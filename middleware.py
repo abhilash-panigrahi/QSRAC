@@ -194,18 +194,13 @@ class QSRACMiddleware(BaseHTTPMiddleware):
             except Exception as e:
                 log.warning("Failed to record anomaly timestamp [%s]: %s", session_id, e)
 
-        # 5. Compute trust
+        # 5. Persist trust (already computed earlier)
         try:
-            
-            # Persist updated trust (ONLY after successful gate)
-            try:
-                rc = get_redis_client()
-                rc.hset(f"session:{session_id}", "trust", trust_value)
-            except Exception as e:
-                log.warning("Failed to persist trust [%s]: %s", session_id, e)            
+            rc = get_redis_client()
+            rc.hset(f"session:{session_id}", "trust", trust_value)
         except Exception as e:
-            return JSONResponse(status_code=500, content={"error": f"Trust computation failed: {str(e)}"})
-
+            log.warning("Failed to persist trust [%s]: %s", session_id, e)
+        
         # 6. Apply policy (RBAC + ABAC + Risk + Trust)
         try:
             decision = evaluate_policy_full(
