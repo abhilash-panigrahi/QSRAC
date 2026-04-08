@@ -167,7 +167,8 @@ def login(request: LoginRequest):
         init_hash = hashlib.sha256(b"init").hexdigest()
 
         # Serialize whatever key type the provider generated (Kyber or ECDH)
-        server_pub_bytes = serialize_public_key(_server_exchange_public_key)
+        from crypto_provider import serialize_exchange_public_key
+        server_pub_bytes = serialize_exchange_public_key(_server_exchange_public_key)
         server_pub_hex = server_pub_bytes.hex()
 
         # create_session writes core fields + sets TTL atomically via pipeline.
