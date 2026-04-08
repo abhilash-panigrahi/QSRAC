@@ -15,14 +15,12 @@ def generate_envelope(
     context_json = json.dumps(context, sort_keys=True, separators=(",", ":"))
     context_hash = hashlib.sha256(context_json.encode("utf-8")).hexdigest()
 
-    prev_hash_digest = hashlib.sha256(prev_hash.encode("utf-8")).hexdigest()
-
     envelope_payload = json.dumps(
         {
             "core_token_hash": core_token_hash,
             "risk": risk,
             "context_hash": context_hash,
-            "prev_hash": prev_hash_digest,
+            "prev_hash": prev_hash,
             "trust": trust,
             "seq": seq,
         },
