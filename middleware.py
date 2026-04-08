@@ -138,13 +138,16 @@ class QSRACMiddleware(BaseHTTPMiddleware):
             seq = int(fast_path_session["seq"])
             session_key = bytes.fromhex(session_key_hex)
 
-            trust_for_envelope = compute_trust(
+            risk_trend_map = {"Low": 0.0, "Medium": 0.3, "High": 0.6, "Critical": 1.0}
+            risk_trend = risk_trend_map.get(risk_level, 0.5)
+
+            trust_value = compute_trust(
                 trust0=trust0,
                 sensitivity=sensitivity,
-                risk_trend=0.0,
-                time_delta=0.0,
+                risk_trend=risk_trend,
+                time_delta=time_delta,
             )
-
+            
             next_seq = seq + 1
 
             envelope_hash, raw_envelope_bytes = generate_envelope(
@@ -153,7 +156,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
                 risk=risk_level,
                 context=context,
                 prev_hash=prev_hash,
-                trust=trust_for_envelope,
+                trust=trust_value,
                 seq=next_seq,
             )
 
@@ -193,15 +196,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
 
         # 5. Compute trust
         try:
-            risk_trend_map = {"Low": 0.0, "Medium": 0.3, "High": 0.6, "Critical": 1.0}
-            risk_trend = risk_trend_map.get(risk_level, 0.5)
-
-            trust_value = compute_trust(
-                trust0=trust0,
-                sensitivity=sensitivity,
-                risk_trend=risk_trend,
-                time_delta=time_delta,
-            )
+            
             # Persist updated trust (ONLY after successful gate)
             try:
                 rc = get_redis_client()
