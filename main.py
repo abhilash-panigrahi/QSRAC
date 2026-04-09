@@ -26,8 +26,7 @@ from crypto_provider import (
     generate_exchange_keypair,
     kem_encapsulate,
     serialize_exchange_public_key,
-    sign_token,
-    PQC_AVAILABLE,
+    sign_token
 )
 from envelope import generate_envelope
 from redis_lua import (
@@ -146,34 +145,14 @@ def login(request: LoginRequest):
         try:
             token_signature = sign_token(_server_signing_private_key, core_token_bytes)
         except Exception:
-            raise Exception("Token signing failed")
+            raise Exception("Token signing failed")       
+        
+        if not request.client_public_key:
+            raise HTTPException(status_code=400, detail="Client public key required")
 
-        if request.client_public_key:
-            client_pub_bytes = bytes.fromhex(request.client_public_key)
-
-            if PQC_AVAILABLE:
-                # Server encapsulates against client's Kyber public key.
-                # ciphertext MUST be returned to client so it can decapsulate.
-                kem_ct, shared_key = kem_encapsulate(client_pub_bytes)
-                kem_ciphertext_hex = kem_ct.hex()
-            else:
-                from cryptography.hazmat.primitives.asymmetric.ec import (
-                    EllipticCurvePublicKey, SECP256R1,
-                )
-                client_ecdh_pub = EllipticCurvePublicKey.from_encoded_point(
-                    SECP256R1(), client_pub_bytes
-                )
-                from crypto_provider import derive_shared_key
-                shared_key = derive_shared_key(_server_exchange_private_key, client_ecdh_pub)
-                kem_ciphertext_hex = None
-        else:
-            shared_key = hmac.new(
-                SECRET_KEY.encode("utf-8"),
-                session_id.encode("utf-8"),
-                hashlib.sha256,
-            ).digest()
-            kem_ciphertext_hex = None
-
+        client_pub_bytes = bytes.fromhex(request.client_public_key)
+        kem_ct, shared_key = kem_encapsulate(client_pub_bytes)
+        kem_ciphertext_hex = kem_ct.hex()
         session_key_hex = shared_key.hex()
         init_hash = hashlib.sha256(b"init").hexdigest()
 
@@ -202,7 +181,7 @@ def login(request: LoginRequest):
 
         signing_pub_bytes = serialize_public_key(_server_signing_public_key)
         signing_pub_hex = signing_pub_bytes.hex()
-        crypto_mode = "PQC" if PQC_AVAILABLE else "CLASSICAL"
+        crypto_mode = "PQC"
 
         return LoginResponse(
             session_id=session_id,
