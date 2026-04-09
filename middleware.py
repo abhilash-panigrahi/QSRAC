@@ -13,11 +13,8 @@ from ml_module import get_risk_score
 from envelope import generate_envelope
 from redis_lua import validate_and_update, get_session, get_redis_client
 from decay_engine import compute_trust
-from policy_engine import evaluate_policy_full
 from crypto_provider import verify as verify_token
 from audit import log_event_async
-from role_module import validate_role
-from attribute_validator import validate_attributes
 
 log = logging.getLogger(__name__)
 
@@ -96,15 +93,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
 
         except Exception as e:
             return JSONResponse(status_code=400, content={"error": f"Context extraction failed: {str(e)}"})
-
-        # 1b. RBAC + ABAC clearance (after context, before risk + gate)
-        try:
-            core_token_dict = json.loads(core_token_raw)
-            role_clearance = validate_role(core_token_dict)
-            abac_clearance = validate_attributes(context)
-        except Exception as e:
-            return JSONResponse(status_code=400, content={"error": f"RBAC/ABAC evaluation failed: {str(e)}"})
-
+        
         # 2. Compute risk
         try:
             risk_level = get_risk_score(context)
@@ -210,56 +199,12 @@ class QSRACMiddleware(BaseHTTPMiddleware):
         except Exception as e:
             log.warning("Failed to persist trust [%s]: %s", session_id, e)
         
-        # 6. Apply policy (RBAC + ABAC + Risk + Trust)
-        try:
-            decision = evaluate_policy_full(
-                risk_level=risk_level,
-                trust_value=trust_value,
-                role_clearance=role_clearance,
-                abac_clearance=abac_clearance,
-            )
-            
-            # Block timestamp — non-fatal telemetry, must be logged on failure.
-            if decision == "Block" and not degraded:
-                try:
-                    rc = get_redis_client()
-                    rc.hset(f"session:{session_id}", "block_timestamp", time.time())
-                except Exception as e:
-                    log.warning("Failed to record block timestamp [%s]: %s", session_id, e)
-
-            # Latency measured to end of policy evaluation — excludes upstream
-            # handler time intentionally (Fast Path cost only).
-            _latency_ms = (perf_counter() - _t_start) * 1000.0
-            _event_type = "DEGRADED" if degraded else "NORMAL"
-
-            asyncio.create_task(
-                log_event_async(
-                    session_id,
-                    decision,
-                    risk_level,
-                    trust_value,
-                    event_type=_event_type,
-                    latency_ms=_latency_ms,
-                )
-            )
-
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"error": f"Policy evaluation failed: {str(e)}"})
-
-        if decision in {"Block", "Deny"}:
-            response = JSONResponse(
-                status_code=403,
-                content={"error": f"Access {decision.lower()}ed by policy", "decision": decision}
-            )
-            response.headers["X-QSRAC-Decision"] = decision
-            response.headers["X-QSRAC-Risk"] = risk_level
-            response.headers["X-QSRAC-Trust"] = str(round(trust_value, 4))
-            response.headers["X-QSRAC-Mode"] = "DEGRADED" if degraded else "NORMAL"
-            return response
-
-        # 7. Return response
+        
+        # 6. Return response
+        request.state.context = context
+        request.state.risk = risk_level
+        request.state.trust = trust_value
         response = await call_next(request)
-        response.headers["X-QSRAC-Decision"] = decision
         response.headers["X-QSRAC-Risk"] = risk_level
         response.headers["X-QSRAC-Trust"] = str(round(trust_value, 4))
         response.headers["X-QSRAC-Mode"] = "DEGRADED" if degraded else "NORMAL"

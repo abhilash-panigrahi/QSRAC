@@ -5,16 +5,13 @@ import json
 import logging
 from datetime import datetime
 from crypto_provider import serialize_public_key
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Depends, Request
+from role_module import validate_role
+from attribute_validator import validate_attributes
+from policy_engine import evaluate_policy
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from middleware import set_signing_public_key
-
-from database import engine
-from models import Base
-# audit-logging
-Base.metadata.create_all(bind=engine)
-
 
 # config must be imported first — raises RuntimeError at startup if any
 # required env var is missing, before any other module initialises.
@@ -93,6 +90,16 @@ class MFAVerifyResponse(BaseModel):
     seq: int
     trust: float
 
+def access_dependency(request: Request):
+    context = request.state.context
+    core_token = json.loads(request.headers.get("X-Core-Token"))
+
+    if not validate_role(core_token):
+        raise HTTPException(status_code=403, detail="Role denied")
+
+    if not validate_attributes(context):
+        raise HTTPException(status_code=403, detail="Attribute denied")
+
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
@@ -112,9 +119,23 @@ def health():
     }
 
 
-@app.get("/test")
-def test(x_session_id: str = Header(...)):
-    return {"msg": "ok"}
+@app.get("/test", dependencies=[Depends(access_dependency)])
+def test(request: Request, x_session_id: str = Header(...)):
+
+    decision = evaluate_policy(
+        request.state.risk,
+        request.state.trust
+    )
+
+    if decision in {"Block", "Deny"}:
+        raise HTTPException(status_code=403, detail=f"Access {decision.lower()}ed")
+
+    return {
+        "msg": "ok",
+        "decision": decision,
+        "risk": request.state.risk,
+        "trust": request.state.trust
+    }
 
 
 @app.post("/login", response_model=LoginResponse)
