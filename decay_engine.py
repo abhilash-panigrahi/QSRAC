@@ -1,7 +1,7 @@
 import math
 
-ALPHA = 0.6
-BETA = 0.4
+ALPHA = 0.02
+BETA = 0.08
 
 
 def compute_trust(

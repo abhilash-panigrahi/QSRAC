@@ -10,6 +10,11 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from middleware import set_signing_public_key
 
+from database import engine
+from models import Base
+# audit-logging
+Base.metadata.create_all(bind=engine)
+
 
 # config must be imported first — raises RuntimeError at startup if any
 # required env var is missing, before any other module initialises.
@@ -41,6 +46,10 @@ MFA_NONCE_TTL = 120
 MFA_TRUST_INCREMENT = 0.2
 
 app = FastAPI(title="QSRAC", version="1.0.0")
+# ── Middleware registration ────────────────────────────────────────────────────
+
+from middleware import QSRACMiddleware, set_signing_public_key
+app.add_middleware(QSRACMiddleware)
 
 _server_signing_private_key, _server_signing_public_key = generate_signing_keypair()
 set_signing_public_key(_server_signing_public_key)
@@ -60,7 +69,8 @@ class LoginResponse(BaseModel):
     core_token: str
     server_public_key: str
     signing_public_key: str
-    crypto_mode: str    
+    crypto_mode: str  
+    init_envelope: str  
     kem_ciphertext: str | None = None
     seq: int
     expires_in: int
@@ -187,8 +197,6 @@ def login(request: LoginRequest):
         client = get_redis_client()
         key = f"session:{session_id}"
         pipe = client.pipeline()
-        pipe.hset(key, "last_hash_1", init_hash)
-        pipe.hset(key, "last_hash_2", init_hash)
         pipe.hset(key, "token_signature", token_signature)
         pipe.expire(key, SESSION_TTL)
         pipe.execute()
@@ -203,6 +211,7 @@ def login(request: LoginRequest):
             server_public_key=server_pub_hex,
             signing_public_key=signing_pub_hex,
             crypto_mode=crypto_mode,
+            init_envelope=init_hash,
             kem_ciphertext=kem_ciphertext_hex,
             seq=0,
             expires_in=SESSION_TTL,
@@ -306,14 +315,14 @@ async def mfa_verify(body: MFAVerifyRequest, x_session_id: str = Header(...)):
         seq = int(session_data["seq"])
         next_seq = seq + 1
 
-        trust0 = 1.0
+        trust0 = float(session_data.get("trust", 1.0))
         current_trust = compute_trust(
             trust0=trust0,
             sensitivity=1.0,
             risk_trend=0.3,
             time_delta=1.0,
         )
-        adjusted_trust = min(trust0, current_trust + MFA_TRUST_INCREMENT)
+        adjusted_trust = min(1.0, current_trust + MFA_TRUST_INCREMENT)
 
         repair_risk = "Low"
         repair_context = {
@@ -381,11 +390,7 @@ async def mfa_verify(body: MFAVerifyRequest, x_session_id: str = Header(...)):
     )
 
 
-# ── Middleware registration ────────────────────────────────────────────────────
 
-from middleware import QSRACMiddleware, set_signing_public_key
-app.add_middleware(QSRACMiddleware)
-set_signing_public_key(_server_signing_public_key)
 
 if __name__ == "__main__":
     import uvicorn

@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 from time import perf_counter
+from urllib import request, response
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -131,6 +132,32 @@ class QSRACMiddleware(BaseHTTPMiddleware):
         try:
             # Fresh Redis read scoped exclusively to Fast Path state
             fast_path_session = get_session(session_id)
+            # 🔥 Read client state
+            try:
+                client_seq = int(request.headers.get("X-QSRAC-Seq", -1))
+            except ValueError:
+                return JSONResponse(status_code=400, content={
+                "error": "Invalid sequence header"
+                })
+            client_env = request.headers.get("X-QSRAC-Envelope")
+
+            if client_seq == -1 or client_env is None:
+                return JSONResponse(status_code=400, content={
+                    "error": "Missing QSRAC state headers"
+                })
+            # Server state
+            server_seq = int(fast_path_session["seq"])
+            server_prev_hash = fast_path_session["last_hash_1"]
+            # Replay protection
+            if client_seq != server_seq:
+                return JSONResponse(status_code=403, content={
+                    "error": "Replay detected (sequence mismatch)"
+                })
+
+            if client_env != server_prev_hash:
+                return JSONResponse(status_code=403, content={
+                    "error": "Replay detected (hash mismatch)"
+                })
 
             core_token_hash = fast_path_session["core_token_hash"]
             session_key_hex = fast_path_session["session_key"]
@@ -171,14 +198,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
 
 
         except ValueError as e:
-            error_msg = str(e)
-            if "SESSION_NOT_FOUND" in error_msg:
-                return JSONResponse(status_code=401, content={"error": "Session not found"})
-            elif "REPLAY_DETECTED" in error_msg:
-                return JSONResponse(status_code=403, content={"error": "Replay detected"})
-            elif "CHAIN_BROKEN" in error_msg:
-                return JSONResponse(status_code=403, content={"error": "Hash chain broken"})
-            return JSONResponse(status_code=403, content={"error": error_msg})
+            return JSONResponse(status_code=403, content={"error": str(e)})
         except ConnectionError:
             if sensitivity >= 3:
                 return JSONResponse(status_code=503, content={"error": "Redis unavailable — fail closed"})
@@ -237,17 +257,25 @@ class QSRACMiddleware(BaseHTTPMiddleware):
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": f"Policy evaluation failed: {str(e)}"})
 
-        if decision == "Block":
-            return JSONResponse(status_code=403, content={"error": "Access blocked by policy", "decision": "Block"})
-        if decision == "Deny":
-            return JSONResponse(status_code=403, content={"error": "Access denied by policy", "decision": "Deny"})
+        if decision in {"Block", "Deny"}:
+            response = JSONResponse(
+                status_code=403,
+                content={"error": f"Access {decision.lower()}ed by policy", "decision": decision}
+            )
+            response.headers["X-QSRAC-Decision"] = decision
+            response.headers["X-QSRAC-Risk"] = risk_level
+            response.headers["X-QSRAC-Trust"] = str(round(trust_value, 4))
+            response.headers["X-QSRAC-Mode"] = "DEGRADED" if degraded else "NORMAL"
+            return response
 
         # 7. Return response
         response = await call_next(request)
         response.headers["X-QSRAC-Decision"] = decision
         response.headers["X-QSRAC-Risk"] = risk_level
         response.headers["X-QSRAC-Trust"] = str(round(trust_value, 4))
-        response.headers["X-QSRAC-Seq"] = str(next_seq) if not degraded else "degraded"
-        response.headers["X-QSRAC-Envelope"] = envelope_hash[:16] if not degraded else "degraded"
+        response.headers["X-QSRAC-Mode"] = "DEGRADED" if degraded else "NORMAL"
+        if not degraded:
+            response.headers["X-QSRAC-Seq"] = str(next_seq)
+            response.headers["X-QSRAC-Envelope"] = envelope_hash
 
         return response

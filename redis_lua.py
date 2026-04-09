@@ -121,13 +121,15 @@ def create_session(session_id: str, core_token_hash: str, session_key: str, ttl:
     so there is no window where the key exists without a TTL.
     """
     try:
+        import hashlib
+        init_hash = hashlib.sha256(b"init").hexdigest()
         client = get_redis_client()
         key = f"session:{session_id}"
         pipe = client.pipeline()
         pipe.hset(key, mapping={
             "core_token_hash": core_token_hash,
-            "last_hash_1": "0" * 64,
-            "last_hash_2": "0" * 64,
+            "last_hash_1": init_hash,
+            "last_hash_2": init_hash,
             "seq": 0,
             "session_key": session_key,
         })
