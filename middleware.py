@@ -41,10 +41,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
         if request.url.path in SKIP_PATHS:
             return await call_next(request)
 
-        # Latency clock — monotonic, sub-microsecond resolution.
-        # Captured before step 0 so total middleware cost is measured.
-        _t_start = perf_counter()
-
+        
         # 0. Core Token Signature Verification
         # ONLY Redis interaction permitted for authentication.
         # session_data is used exclusively here and NOT passed to Steps 3-4.
@@ -183,15 +180,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
             # Degraded mode: all Fast Path Redis state skipped, no seq increment
             degraded = True
 
-        # Anomaly timestamp — only in normal mode.
-        # Failure is non-fatal (best-effort telemetry) but must be logged.
-        if risk_level in {"High", "Critical"} and not degraded:
-            try:
-                rc = get_redis_client()
-                rc.hsetnx(f"session:{session_id}", "first_anomaly_timestamp", time.time())
-            except Exception as e:
-                log.warning("Failed to record anomaly timestamp [%s]: %s", session_id, e)
-
+        
         # 5. Persist trust (already computed earlier)
         try:
             rc = get_redis_client()

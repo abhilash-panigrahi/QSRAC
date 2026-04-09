@@ -358,13 +358,11 @@ async def mfa_verify(body: MFAVerifyRequest, x_session_id: str = Header(...)):
     asyncio.create_task(
         log_event_async(
             x_session_id,
-            decision="REPAIR",
-            risk=repair_risk,
-            trust=adjusted_trust,
-            event_type="REPAIR",
-            latency_ms=None,
+            "REPAIR",
+            repair_risk,
+            adjusted_trust,
+            )
         )
-    )
 
     return MFAVerifyResponse(
         status="repaired",
