@@ -1,4 +1,9 @@
 {
+  "thresholds": {
+    "low": -0.44489881769444745,
+    "medium": -0.5381068133363818,
+    "high": -0.631314808978316
+  },
   "score_stats": {
     "min": -0.688706982073158,
     "max": -0.40663340874692866,
@@ -7,12 +12,12 @@
   },
   "normal_mean": -0.4649229097658406,
   "attack_mean": -0.618508932370025,
-  "fp_rate": 0.045,
+  "fp_rate": 0.065,
   "fn_rate": 0.0,
   "risk_distribution": {
-    "Low": 305,
-    "Medium": 459,
-    "High": 206,
-    "Critical": 30
+    "Low": 240,
+    "Medium": 508,
+    "High": 192,
+    "Critical": 60
   }
 }

@@ -233,6 +233,17 @@ def main():
     low_thresh = np.percentile(normal_scores, 70)
     high_thresh = np.percentile(attack_scores, 30)
     medium_thresh = (low_thresh + high_thresh) / 2
+    # ── Persist calibrated thresholds ──
+    thresholds = {
+        "low": float(low_thresh),
+        "medium": float(medium_thresh),
+        "high": float(high_thresh)
+    }
+
+    with open("thresholds.json", "w") as f:
+        json.dump(thresholds, f, indent=2)
+
+    print("\n✅ thresholds.json saved")
 
     print("CALIBRATED THRESHOLDS:")
     print(f"LOW     >= {low_thresh:.4f}")
@@ -254,6 +265,7 @@ def main():
     print(f"Std : {std_score:.6f}")
     
     results_dict = {
+        "thresholds": thresholds,
         "score_stats": {
             "min": float(all_scores.min()),
             "max": float(all_scores.max()),
