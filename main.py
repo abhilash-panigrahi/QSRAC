@@ -3,7 +3,6 @@ import hashlib
 import hmac
 import json
 import logging
-from datetime import datetime
 from crypto_provider import serialize_public_key
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from role_module import validate_role
@@ -11,7 +10,6 @@ from attribute_validator import validate_attributes
 from policy_engine import evaluate_policy
 from pydantic import BaseModel
 from datetime import datetime, timezone
-from middleware import set_signing_public_key
 
 # config must be imported first — raises RuntimeError at startup if any
 # required env var is missing, before any other module initialises.
@@ -85,10 +83,6 @@ class MFAChallengeResponse(BaseModel):
     timestamp: float
 
 
-class MFAVerifyResponse(BaseModel):
-    status: str
-    seq: int
-    trust: float
 
 def access_dependency(request: Request):
     context = request.state.context
@@ -255,7 +249,7 @@ def mfa_challenge(x_session_id: str = Header(...)):
     return MFAChallengeResponse(nonce=nonce, challenge=challenge, timestamp=timestamp)
 
 
-@app.post("/mfa/verify", response_model=MFAVerifyResponse)
+@app.post("/mfa/verify")
 async def mfa_verify(body: MFAVerifyRequest, x_session_id: str = Header(...)):
     """
     Verify MFA response and perform state-repair transition.
@@ -363,12 +357,13 @@ async def mfa_verify(body: MFAVerifyRequest, x_session_id: str = Header(...)):
             adjusted_trust,
             )
         )
-
-    return MFAVerifyResponse(
-        status="repaired",
-        seq=next_seq,
-        trust=round(adjusted_trust, 4),
-    )
+    
+    return {
+        "status": "repaired",
+        "seq": next_seq,
+        "envelope": envelope_hash,
+        "trust": adjusted_trust,
+    }
 
 
 
