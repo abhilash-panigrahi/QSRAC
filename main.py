@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import json
 import logging
-from crypto_provider import serialize_public_key
+from crypto_provider import CRYPTO_MODE, serialize_public_key
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from role_module import validate_role
 from attribute_validator import validate_attributes
@@ -196,7 +196,8 @@ def login(request: LoginRequest):
 
         signing_pub_bytes = serialize_public_key(_server_signing_public_key)
         signing_pub_hex = signing_pub_bytes.hex()
-        crypto_mode = "PQC"
+        from crypto_provider import CRYPTO_MODE
+        crypto_mode = CRYPTO_MODE
 
         return LoginResponse(
             session_id=session_id,
