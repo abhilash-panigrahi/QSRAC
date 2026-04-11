@@ -1,16 +1,19 @@
 # crypto_provider.py
-# Interface-driven crypto layer for QSRAC
-# Supports: MOCK (host) | PQC (Docker with liboqs/pqcrypto)
+# FINAL: PQC (liboqs) + MOCK fallback
+# ML-KEM-512 (Kyber512) + ML-DSA-44 (Dilithium2)
 
 import os
+import logging
 import hashlib
 import hmac
+
+log = logging.getLogger(__name__)
 
 CRYPTO_MODE = os.getenv("CRYPTO_MODE", "MOCK")  # MOCK | PQC
 
 
 # ─────────────────────────────────────────────
-# INTERFACE (CONTRACT — DO NOT CHANGE)
+# INTERFACE (DO NOT CHANGE)
 # ─────────────────────────────────────────────
 
 class CryptoProvider:
@@ -24,15 +27,14 @@ class CryptoProvider:
 
 
 # ─────────────────────────────────────────────
-# MOCK IMPLEMENTATION (HOST-SAFE)
+# MOCK IMPLEMENTATION (FAST / DEV SAFE)
 # ─────────────────────────────────────────────
 
 class MockCryptoProvider(CryptoProvider):
 
-    # --- Signing (symmetric for correctness) ---
     def generate_signing_keypair(self):
         key = os.urandom(32)
-        return key, key   # symmetric key for mock
+        return key, key
 
     def sign(self, private_key, data: bytes) -> bytes:
         return hmac.new(private_key, data, hashlib.sha256).digest()
@@ -41,7 +43,6 @@ class MockCryptoProvider(CryptoProvider):
         expected = hmac.new(public_key, data, hashlib.sha256).digest()
         return hmac.compare_digest(signature, expected)
 
-    # --- KEM (deterministic, consistent shared secret) ---
     def generate_exchange_keypair(self):
         sk = os.urandom(32)
         pk = hashlib.sha256(sk).digest()
@@ -49,67 +50,87 @@ class MockCryptoProvider(CryptoProvider):
 
     def kem_encapsulate(self, peer_public_key: bytes):
         shared = hashlib.sha256(peer_public_key).digest()
-        return shared, shared   # ciphertext == shared
+        return shared, shared  # (ciphertext, shared_secret)
 
     def kem_decapsulate(self, private_key: bytes, ciphertext: bytes):
         return ciphertext
 
 
 # ─────────────────────────────────────────────
-# PQC IMPLEMENTATION (DOCKER ONLY)
+# PQC IMPLEMENTATION (liboqs)
 # ─────────────────────────────────────────────
 
 class PQCCryptoProvider(CryptoProvider):
 
     def __init__(self):
-        from pqcrypto.sign import dilithium2
-        from pqcrypto.kem import kyber512
+        import oqs
 
-        self.dilithium2 = dilithium2
-        self.kyber512 = kyber512
+        # NIST standard mapping:
+        # ML-DSA-44 → Dilithium2
+        # ML-KEM-512 → Kyber512
+        self.sig_alg = "Dilithium2"
+        self.kem_alg = "Kyber512"
+        self.oqs = oqs
 
-    # --- Signing ---
+    # ── SIGNING (ML-DSA) ──────────────────────
+
     def generate_signing_keypair(self):
-        pk, sk = self.dilithium2.generate_keypair()
-        return sk, pk
+        with self.oqs.Signature(self.sig_alg) as signer:
+            public_key = signer.generate_keypair()
+            private_key = signer.export_secret_key()
+        return private_key, public_key
 
     def sign(self, private_key, data: bytes) -> bytes:
-        return self.dilithium2.sign(data, private_key)
+        # Key-specific instance (safe, avoids reuse issues)
+        with self.oqs.Signature(self.sig_alg, secret_key=private_key) as signer:
+            return signer.sign(data)
 
     def verify(self, signature: bytes, data: bytes, public_key) -> bool:
         try:
-            self.dilithium2.verify(data, signature, public_key)
-            return True
+            with self.oqs.Signature(self.sig_alg) as verifier:
+                return verifier.verify(data, signature, public_key)
         except Exception:
             return False
 
-    # --- KEM ---
+    # ── KEM (ML-KEM) ──────────────────────────
+
     def generate_exchange_keypair(self):
-        pk, sk = self.kyber512.generate_keypair()
-        return sk, pk
+        with self.oqs.KeyEncapsulation(self.kem_alg) as kem:
+            public_key = kem.generate_keypair()
+            private_key = kem.export_secret_key()
+        return private_key, public_key
 
     def kem_encapsulate(self, peer_public_key: bytes):
-        return self.kyber512.encrypt(peer_public_key)
+        with self.oqs.KeyEncapsulation(self.kem_alg) as kem:
+            return kem.encap_secret(peer_public_key)  # (ciphertext, shared_secret)
 
     def kem_decapsulate(self, private_key: bytes, ciphertext: bytes):
-        return self.kyber512.decrypt(private_key, ciphertext)
+        with self.oqs.KeyEncapsulation(self.kem_alg, secret_key=private_key) as kem:
+            return kem.decap_secret(ciphertext)
 
 
 # ─────────────────────────────────────────────
-# PROVIDER SELECTOR
+# PROVIDER SELECTOR (FAIL-SAFE)
 # ─────────────────────────────────────────────
 
 def _get_provider():
-    if CRYPTO_MODE == "PQC":
+    if CRYPTO_MODE == "MOCK":
+        log.info("Using MOCK crypto provider")
+        return MockCryptoProvider()
+
+    try:
+        log.info("Using PQC crypto provider (liboqs)")
         return PQCCryptoProvider()
-    return MockCryptoProvider()
+    except (ImportError, Exception) as e:
+        log.warning("PQC init failed (%s). Falling back to MOCK.", e)
+        return MockCryptoProvider()
 
 
 _provider = _get_provider()
 
 
 # ─────────────────────────────────────────────
-# PUBLIC API (USED BY SYSTEM — DO NOT CHANGE)
+# PUBLIC API (DO NOT CHANGE)
 # ─────────────────────────────────────────────
 
 def generate_signing_keypair():
@@ -130,17 +151,28 @@ def kem_encapsulate(peer_public_key: bytes):
 def kem_decapsulate(private_key: bytes, ciphertext: bytes):
     return _provider.kem_decapsulate(private_key, ciphertext)
 
+
+# ─────────────────────────────────────────────
+# SERIALIZATION (UNCHANGED)
+# ─────────────────────────────────────────────
+
 def serialize_public_key(public_key):
     return public_key
 
 def serialize_exchange_public_key(public_key):
     return public_key
 
+
+# ─────────────────────────────────────────────
+# TOKEN HELPERS
+# ─────────────────────────────────────────────
+
 def sign_token(private_key, data: bytes) -> str:
     return sign(private_key, data).hex()
 
 def verify_token(signature_hex: str, data: bytes, public_key) -> bool:
     try:
-        return verify(bytes.fromhex(signature_hex), data, public_key)
-    except Exception:
+        raw_signature = bytes.fromhex(signature_hex)
+    except ValueError:
         return False
+    return verify(raw_signature, data, public_key)

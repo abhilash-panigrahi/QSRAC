@@ -8,6 +8,7 @@ from urllib import request, response
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from policy_engine import evaluate_policy
 
 from ml_module import get_risk_score
 from envelope import generate_envelope
@@ -19,6 +20,8 @@ from audit import log_event_async
 log = logging.getLogger(__name__)
 
 SKIP_PATHS = {
+    "/",
+    "/favicon.ico",
     "/health",
     "/login",
     "/docs",
@@ -38,7 +41,8 @@ def set_signing_public_key(public_key):
 
 class QSRACMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in SKIP_PATHS:
+        path = request.url.path.rstrip("/") or "/"
+        if path in SKIP_PATHS:
             return await call_next(request)
 
         
@@ -48,19 +52,26 @@ class QSRACMiddleware(BaseHTTPMiddleware):
         try:
             session_id = request.headers.get("X-Session-ID")
             if not session_id:
+                await log_event_async(session_id or "unknown", "Reject", "Unknown", 0.0)
                 return JSONResponse(status_code=401, content={"error": "Missing X-Session-ID"})
 
             core_token_raw = request.headers.get("X-Core-Token")
             if not core_token_raw:
+                await log_event_async(session_id or "unknown", "Reject", "Unknown", 0.0)
                 return JSONResponse(status_code=401, content={"error": "Missing X-Core-Token"})
 
             session_data = get_session(session_id)
-            token_signature = bytes.fromhex(session_data.get("token_signature"))
+            token_signature_hex = session_data.get("token_signature")
+            if not token_signature_hex:
+                return JSONResponse(status_code=401, content={"error": "Missing token signature in session"})
+            token_signature = bytes.fromhex(token_signature_hex)
             if not token_signature:
+                await log_event_async(session_id or "unknown", "Reject", "Unknown", 0.0)
                 return JSONResponse(status_code=401, content={"error": "Missing token signature in session"})
 
             core_token_bytes = core_token_raw.encode("utf-8")
             if not verify_token(token_signature, core_token_bytes, _server_signing_public_key):
+                await log_event_async(session_id or "unknown", "Reject", "Unknown", 0.0)
                 return JSONResponse(status_code=401, content={"error": "Core token signature invalid"})
 
         except ValueError as e:
@@ -72,19 +83,45 @@ class QSRACMiddleware(BaseHTTPMiddleware):
 
         # 1. Extract context
         try:
-            context = {
-                "hour_of_day": float(request.headers.get("X-Hour-Of-Day", 12)),
-                "request_rate": float(request.headers.get("X-Request-Rate", 1.0)),
-                "failed_attempts": float(request.headers.get("X-Failed-Attempts", 0)),
-                "geo_risk_score": float(request.headers.get("X-Geo-Risk-Score", 0.0)),
-                "device_trust_score": float(request.headers.get("X-Device-Trust-Score", 1.0)),
-                "sensitivity_level": float(request.headers.get("X-Sensitivity-Level", 1.0)),
-                "is_vpn": float(request.headers.get("X-Is-VPN", 0)),
-                "is_tor": float(request.headers.get("X-Is-TOR", 0)),
+            ALLOWED_CONTEXT_KEYS = {
+                "hour_of_day",
+                "request_rate",
+                "failed_attempts",
+                "geo_risk_score",
+                "device_trust_score",
+                "sensitivity_level",
+                "is_vpn",
+                "is_tor",
+            }
+            def _extract_context(headers):
+                context = {}
+                for key, value in headers.items():
+                    if key.startswith("x-"):
+                        norm_key = key[2:].replace("-", "_").lower()
+                        if norm_key in ALLOWED_CONTEXT_KEYS:
+                            context[norm_key] = float(value)
+                return context
+
+
+            context = _extract_context(request.headers)
+            REQUIRED_CONTEXT_KEYS = {
+                "hour_of_day",
+                "request_rate",
+                "failed_attempts",
+                "geo_risk_score",
+                "device_trust_score",
+                "sensitivity_level",
+                "is_vpn",
+                "is_tor",
             }
 
+            if not REQUIRED_CONTEXT_KEYS.issubset(context.keys()):
+                return JSONResponse(status_code=400, content={"error": "Missing required context fields"})
+
             sensitivity = context["sensitivity_level"]
-            time_delta = float(request.headers.get("X-Time-Delta", 1.0))
+            current_time = time.time()
+            last_req_at = float(session_data.get("last_req_at", current_time))
+            time_delta = current_time - last_req_at
             persisted_trust = session_data.get("trust")
             trust0 = float(persisted_trust) if persisted_trust is not None else float(request.headers.get("X-Trust-Init", 1.0))
 
@@ -94,6 +131,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
         # 2. Compute risk
         try:
             risk_level = get_risk_score(context)
+            risk_level = risk_level.capitalize()
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": f"Risk computation failed: {str(e)}"})
 
@@ -167,6 +205,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
                 seq=next_seq,
                 new_hash=envelope_hash,
                 prev_hash=prev_hash,
+                current_time=current_time,
             )
             if result != "OK":
                 return JSONResponse(status_code=403, content={"error": f"Gate rejected: {result}"})
@@ -176,15 +215,24 @@ class QSRACMiddleware(BaseHTTPMiddleware):
             return JSONResponse(status_code=403, content={"error": str(e)})
         except ConnectionError:
             if sensitivity >= 3:
-                return JSONResponse(status_code=503, content={"error": "Redis unavailable — fail closed"})
-            # Degraded mode: all Fast Path Redis state skipped, no seq increment
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": "Redis unavailable — High-sensitivity access blocked"}
+                )
+
+            # degraded mode
             degraded = True
+            trust_value = 0.5
+            risk_level = "Medium"
 
         
         # 5. Persist trust (already computed earlier)
         try:
             rc = get_redis_client()
-            rc.hset(f"session:{session_id}", "trust", trust_value)
+            try:
+                rc.hset(f"session:{session_id}", "trust", trust_value)
+            except Exception:
+                log.warning("Trust persistence failed — continuing without update")
         except Exception as e:
             log.warning("Failed to persist trust [%s]: %s", session_id, e)
         
@@ -193,9 +241,10 @@ class QSRACMiddleware(BaseHTTPMiddleware):
         request.state.context = context
         request.state.risk = risk_level
         request.state.trust = trust_value
+        decision = evaluate_policy(risk_level, trust_value)
         response = await call_next(request)
         response.headers["X-QSRAC-Risk"] = risk_level
-        response.headers["X-QSRAC-Trust"] = str(round(trust_value, 4))
+        response.headers["X-QSRAC-Trust"] = str(round(trust_value, 6))
         response.headers["X-QSRAC-Mode"] = "DEGRADED" if degraded else "NORMAL"
         if not degraded:
             response.headers["X-QSRAC-Seq"] = str(next_seq)

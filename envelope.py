@@ -12,7 +12,10 @@ def generate_envelope(
     trust: float,
     seq: int,
 ) -> tuple[str, bytes]:
-    context_json = json.dumps(context, sort_keys=True, separators=(",", ":"))
+    # IEEE Alignment: Force all context values to float to ensure hash consistency
+    normalized_context = {k: float(v) for k, v in context.items()}
+    
+    context_json = json.dumps(normalized_context, sort_keys=True, separators=(",", ":"))
     context_hash = hashlib.sha256(context_json.encode("utf-8")).hexdigest()
 
     envelope_payload = json.dumps(
@@ -21,7 +24,7 @@ def generate_envelope(
             "risk": risk,
             "context_hash": context_hash,
             "prev_hash": prev_hash,
-            "trust": trust,
+            "trust": round(trust, 6),
             "seq": seq,
         },
         sort_keys=True,

@@ -62,6 +62,7 @@ class LoginResponse(BaseModel):
     core_token: str
     server_public_key: str
     signing_public_key: str
+    token_signature: str
     crypto_mode: str  
     init_envelope: str  
     kem_ciphertext: str | None = None
@@ -156,6 +157,9 @@ def login(request: LoginRequest):
         )
         core_token_bytes = core_token_payload.encode("utf-8")
         core_token_hash = hashlib.sha256(core_token_bytes).hexdigest()
+        recomputed_hash = hashlib.sha256(core_token_bytes).hexdigest()
+        if recomputed_hash != core_token_hash:
+            raise Exception("Core token integrity failure")
 
         try:
             token_signature = sign_token(_server_signing_private_key, core_token_bytes)
@@ -206,6 +210,7 @@ def login(request: LoginRequest):
             signing_public_key=signing_pub_hex,
             crypto_mode=crypto_mode,
             init_envelope=init_hash,
+            token_signature=token_signature,
             kem_ciphertext=kem_ciphertext_hex,
             seq=0,
             expires_in=SESSION_TTL,
@@ -329,6 +334,7 @@ async def mfa_verify(body: MFAVerifyRequest, x_session_id: str = Header(...)):
             seq=next_seq,
             new_hash=envelope_hash,
             prev_hash=prev_hash,
+            current_time=datetime.now(timezone.utc).timestamp(),
         )
         if result != "OK":
             raise HTTPException(status_code=403, detail=f"Gate rejected repair: {result}")

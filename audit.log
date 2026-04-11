@@ -6,3 +6,20 @@
 {"timestamp": "2026-04-09T22:20:43.302650+00:00", "session_id": "8256463d-1d15-40c2-82e5-7bcda57182e5", "decision": "REPAIR", "risk": "Low", "trust": 1.0}
 {"timestamp": "2026-04-09T22:23:30.213779+00:00", "session_id": "1cb7540a-b2d7-4f4b-a4d1-b32c1a23a80b", "decision": "REPAIR", "risk": "Low", "trust": 1.0}
 {"timestamp": "2026-04-10T06:58:36.392583+00:00", "session_id": "4cf423f2-aa36-4720-aac2-c5f99b73d685", "decision": "REPAIR", "risk": "Low", "trust": 1.0}
+{"timestamp": "2026-04-11T20:13:25.537433+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:13:25.699402+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:13:27.272955+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:13:27.395889+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:16:39.379697+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:16:39.514850+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:16:42.791964+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:16:42.904890+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:16:43.025866+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:16:43.106787+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:16:43.870889+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:16:43.980074+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:18:00.365513+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:18:01.909979+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:18:02.144956+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:18:02.589570+00:00", "session_id": "unknown", "decision": "Reject", "risk": "Unknown", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-11T20:55:49.463731+00:00", "session_id": "eba8d139-8a9b-46e4-889b-c5b7083de57f", "decision": "REPAIR", "risk": "Low", "trust": 0.904977930860976, "status": "OK"}

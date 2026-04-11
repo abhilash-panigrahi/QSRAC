@@ -52,7 +52,11 @@ APP_HOST:    str = _optional("APP_HOST", "0.0.0.0")
 APP_PORT:    int = int(_optional("APP_PORT", "8000"))
 
 # ── Risk ML Thresholds ────────────────────────────────────────────────────────
-
+# NOTE: thresholds must satisfy: LOW > MEDIUM > HIGH (scores are negative)
 RISK_THRESHOLD_LOW: float    = float(_optional("RISK_THRESHOLD_LOW", "-0.4449"))
 RISK_THRESHOLD_MEDIUM: float = float(_optional("RISK_THRESHOLD_MEDIUM", "-0.5381"))
 RISK_THRESHOLD_HIGH: float   = float(_optional("RISK_THRESHOLD_HIGH", "-0.6313"))
+if not (RISK_THRESHOLD_LOW > RISK_THRESHOLD_MEDIUM > RISK_THRESHOLD_HIGH):
+    raise RuntimeError(
+        "[QSRAC] Invalid risk thresholds: must satisfy LOW > MEDIUM > HIGH"
+    )

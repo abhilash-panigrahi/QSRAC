@@ -53,6 +53,7 @@ end
 redis.call('HSET', key, 'last_hash_2', stored_last_hash)
 redis.call('HSET', key, 'last_hash_1', new_hash)
 redis.call('HSET', key, 'seq', seq)
+redis.call('HSET', key, 'last_req_at', ARGV[4])
 
 return 'OK'
 """
@@ -80,7 +81,7 @@ def load_lua_script() -> str:
     return _script_sha
 
 
-def validate_and_update(session_id: str, seq: int, new_hash: str, prev_hash: str) -> str:
+def validate_and_update(session_id: str, seq: int, new_hash: str, prev_hash: str, current_time: float) -> str:
     """
     Atomically verify seq + hash-chain then write new state.
     On success, refreshes the session TTL so active sessions never expire
@@ -91,7 +92,7 @@ def validate_and_update(session_id: str, seq: int, new_hash: str, prev_hash: str
         client = get_redis_client()
         sha = load_lua_script()
         key = f"session:{session_id}"
-        result = client.evalsha(sha, 1, key, seq, new_hash, prev_hash)
+        result = client.evalsha(sha, 1, key, seq, new_hash, prev_hash, current_time)
         # Gate confirmed OK — refresh TTL to match token expiry.
         # A failed gate never reaches this line so TTL is never extended
         # for a rejected request.
@@ -131,6 +132,7 @@ def create_session(session_id: str, core_token_hash: str, session_key: str, ttl:
             "last_hash_2": init_hash,
             "seq": 0,
             "session_key": session_key,
+            "trust": 1.0,
         })
         pipe.expire(key, ttl)
         pipe.execute()
