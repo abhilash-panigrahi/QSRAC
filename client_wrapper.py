@@ -52,7 +52,8 @@ class QSRACClient:
 
         r = requests.get(f"{self.base_url}{path}", headers=headers)
 
-        if r.status_code == 200:
+        # 🔥 CRITICAL FIX: Sync state on ALL responses (200 + 403)
+        if "X-QSRAC-Seq" in r.headers and "X-QSRAC-Envelope" in r.headers:
             new_seq = int(r.headers["X-QSRAC-Seq"])
             new_env = r.headers["X-QSRAC-Envelope"]
 
@@ -61,7 +62,7 @@ class QSRACClient:
             expected_hash, _ = generate_envelope(
                 self.session_key,
                 hashlib.sha256(self.core_token.encode()).hexdigest(),
-                r.headers["X-QSRAC-Risk"],
+                r.headers["X-QSRAC-Risk"],  # no fallback
                 context,
                 self.envelope,
                 float(r.headers["X-QSRAC-Trust"]),
@@ -71,6 +72,7 @@ class QSRACClient:
             if new_env != expected_hash:
                 raise Exception("CRITICAL: Server state verification failed")
 
+            # ✅ ALWAYS update state (even on 403)
             self.seq = new_seq
             self.envelope = new_env
 
@@ -159,7 +161,13 @@ if __name__ == "__main__":
         }
     )
 
-    print("MFA result:", res.status_code, res.text)
+    result = res.json()
+
+    print("MFA result:", result)
+
+    # 🔥 FINAL CRITICAL FIX: sync state after MFA
+    client.seq = result["seq"]
+    client.envelope = result["envelope"]
 
     # ─────────────────────────────
     # 6. CONFIRM RECOVERY
