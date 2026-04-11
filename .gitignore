@@ -1,1 +1,3 @@
 liboqs/
+__pycache__/
+*.pyc
