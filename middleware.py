@@ -339,10 +339,13 @@ class QSRACMiddleware(BaseHTTPMiddleware):
             return self._finalize_response(response, risk_level, trust_value, next_seq, envelope_hash)
 
         except ValueError as e:
+            await log_event_async(session_id or "UNKNOWN", "Reject", str(e), 0.0)
             return JSONResponse(status_code=401, content={"error": str(e)})
         except ConnectionError:
+            await log_event_async(session_id or "UNKNOWN", "Reject", "BackendUnavailable", 0.0)
             return JSONResponse(status_code=503, content={"error": "Security backend unreachable"})
         except Exception as e:
+            await log_event_async(session_id or "UNKNOWN", "Reject", "InternalError", 0.0)
             log.error(f"Middleware Error: {str(e)}")
             return JSONResponse(status_code=500, content={"error": "Internal authentication failure"})
 
