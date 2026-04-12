@@ -1,24 +1,15 @@
 """
 redis_lua.py — Redis session management and atomic Lua gate for QSRAC.
 
-TTL contract
-────────────
-Every write path that mutates session state calls EXPIRE with SESSION_TTL
-so the Redis key's lifetime stays in sync with the token's expiry regardless
-of which code path last touched the key.  The gate Lua script intentionally
-does NOT refresh TTL — it is a pure integrity check.  TTL extension is done
-by the Python caller (validate_and_update) after a confirmed OK so that a
-failed gate never silently extends a session.
-
-Key namespaces
-──────────────
-  session:{session_id}  — Fast Path session state (this module)
-  mfa:{session_id}:*    — MFA nonces                  (main.py)
+This module enforces the 'Fast Path' security invariants:
+1. Strict sequence increment (Replay Protection).
+2. Hash-chain continuity (Integrity Enforcement).
+3. Atomic state transitions to eliminate TOCTOU windows.
 """
 
 import logging
 import redis
-
+import hashlib
 from config import REDIS_HOST, REDIS_PORT, REDIS_DB, SESSION_TTL
 
 log = logging.getLogger(__name__)
@@ -26,40 +17,52 @@ log = logging.getLogger(__name__)
 _redis_client = None
 
 # ── Atomic gate Lua script ─────────────────────────────────────────────────────
-# Enforces strict seq increment and hash-chain continuity.
-# No TTL mutation inside Lua — see module docstring.
+# Issue 4: Includes atomic trust update and defensive corruption checks.
 LUA_SCRIPT = """
 local key = KEYS[1]
 local seq = tonumber(ARGV[1])
 local new_hash = ARGV[2]
 local prev_hash = ARGV[3]
+local timestamp = ARGV[4]
+local new_trust = tonumber(ARGV[5]) -- Issue 4: Trust is passed as a numeric string
 
 local exists = redis.call('EXISTS', key)
 if exists == 0 then
     return redis.error_reply('SESSION_NOT_FOUND')
 end
 
-local stored_seq = tonumber(redis.call('HGET', key, 'seq'))
+-- Fetch state fields for validation
+local stored_seq_raw = redis.call('HGET', key, 'seq')
 local stored_last_hash = redis.call('HGET', key, 'last_hash_1')
 
+-- Defensive check: Ensure critical session fields are not null
+if not stored_seq_raw or not stored_last_hash then
+    return redis.error_reply('CORRUPTED_SESSION')
+end
+
+local stored_seq = tonumber(stored_seq_raw)
+
+-- Sequence increment check for Replay Protection
 if seq ~= (stored_seq + 1) then
     return redis.error_reply('REPLAY_DETECTED')
 end
 
+-- Hash-chain continuity check for Forward Integrity
 if stored_last_hash ~= prev_hash then
     return redis.error_reply('CHAIN_BROKEN')
 end
 
+-- Atomic update of state and trust score
 redis.call('HSET', key, 'last_hash_2', stored_last_hash)
 redis.call('HSET', key, 'last_hash_1', new_hash)
 redis.call('HSET', key, 'seq', seq)
-redis.call('HSET', key, 'last_req_at', ARGV[4])
+redis.call('HSET', key, 'last_req_at', timestamp)
+redis.call('HSET', key, 'trust', new_trust)
 
 return 'OK'
 """
 
 _script_sha = None
-
 
 def get_redis_client() -> redis.Redis:
     global _redis_client
@@ -72,7 +75,6 @@ def get_redis_client() -> redis.Redis:
         )
     return _redis_client
 
-
 def load_lua_script() -> str:
     global _script_sha
     if _script_sha is None:
@@ -80,28 +82,30 @@ def load_lua_script() -> str:
         _script_sha = client.script_load(LUA_SCRIPT)
     return _script_sha
 
-
-def validate_and_update(session_id: str, seq: int, new_hash: str, prev_hash: str, current_time: float) -> str:
+def validate_and_update(session_id: str, seq: int, new_hash: str, prev_hash: str, current_time: float, trust: float) -> str:
     """
     Atomically verify seq + hash-chain then write new state.
-    On success, refreshes the session TTL so active sessions never expire
-    mid-use while idle sessions still expire on schedule.
-    Raises ValueError for logical errors, ConnectionError for Redis outage.
+    On success, refreshes the session TTL.
     """
     try:
         client = get_redis_client()
         sha = load_lua_script()
         key = f"session:{session_id}"
-        result = client.evalsha(sha, 1, key, seq, new_hash, prev_hash, current_time)
-        # Gate confirmed OK — refresh TTL to match token expiry.
-        # A failed gate never reaches this line so TTL is never extended
-        # for a rejected request.
+        
+        # Issue 4: Ensure trust is passed as a float for Lua tonumber()
+        result = client.evalsha(sha, 1, key, seq, new_hash, prev_hash, current_time, float(trust))
+        
+        # Refresh TTL only on gate success
         client.expire(key, SESSION_TTL)
         return result
+        
     except redis.exceptions.ResponseError as e:
         error_msg = str(e)
+        # Granular mapping of Lua error replies to Python ValueErrors
         if "SESSION_NOT_FOUND" in error_msg:
             raise ValueError("SESSION_NOT_FOUND")
+        elif "CORRUPTED_SESSION" in error_msg:
+            raise ValueError("CORRUPTED_SESSION")
         elif "REPLAY_DETECTED" in error_msg:
             raise ValueError("REPLAY_DETECTED")
         elif "CHAIN_BROKEN" in error_msg:
@@ -113,15 +117,9 @@ def validate_and_update(session_id: str, seq: int, new_hash: str, prev_hash: str
     except Exception as e:
         raise RuntimeError(f"Unexpected Redis error: {str(e)}")
 
-
 def create_session(session_id: str, core_token_hash: str, session_key: str, ttl: int) -> bool:
-    """
-    Atomically create session hash and set TTL in a single pipeline.
-    The pipeline guarantees EXPIRE is set in the same round-trip as HSET
-    so there is no window where the key exists without a TTL.
-    """
+    """Initializes session hash and sets TTL atomically."""
     try:
-        import hashlib
         init_hash = hashlib.sha256(b"init").hexdigest()
         client = get_redis_client()
         key = f"session:{session_id}"
@@ -137,33 +135,11 @@ def create_session(session_id: str, core_token_hash: str, session_key: str, ttl:
         pipe.expire(key, ttl)
         pipe.execute()
         return True
-    except redis.exceptions.ConnectionError as e:
-        raise ConnectionError(f"Redis connection failed: {str(e)}")
     except Exception as e:
         raise RuntimeError(f"Failed to create session: {str(e)}")
 
-
-def extend_session_ttl(session_id: str, ttl: int) -> None:
-    """
-    Refresh TTL on an existing session key.  Called by main.py after any
-    post-create hset operations to ensure the key never loses its expiry.
-    Raises RuntimeError on failure — callers must not silently ignore this.
-    """
-    try:
-        client = get_redis_client()
-        key = f"session:{session_id}"
-        refreshed = client.expire(key, ttl)
-        if not refreshed:
-            raise RuntimeError(f"TTL refresh failed — key does not exist: {key}")
-    except redis.exceptions.ConnectionError as e:
-        raise ConnectionError(f"Redis connection failed: {str(e)}")
-    except RuntimeError:
-        raise
-    except Exception as e:
-        raise RuntimeError(f"Failed to extend session TTL: {str(e)}")
-
-
 def get_session(session_id: str) -> dict:
+    """Fetches all fields for a session; raises ValueError if missing."""
     try:
         client = get_redis_client()
         key = f"session:{session_id}"
@@ -173,19 +149,25 @@ def get_session(session_id: str) -> dict:
         return data
     except ValueError:
         raise
-    except redis.exceptions.ConnectionError as e:
-        raise ConnectionError(f"Redis connection failed: {str(e)}")
     except Exception as e:
         raise RuntimeError(f"Failed to get session: {str(e)}")
 
+def extend_session_ttl(session_id: str, ttl: int) -> None:
+    """Refreshes TTL on an existing session key."""
+    try:
+        client = get_redis_client()
+        key = f"session:{session_id}"
+        if not client.expire(key, ttl):
+            raise RuntimeError(f"TTL refresh failed — key does not exist: {key}")
+    except Exception as e:
+        raise RuntimeError(f"Failed to extend session TTL: {str(e)}")
 
 def delete_session(session_id: str) -> bool:
+    """Deletes the session key from Redis."""
     try:
         client = get_redis_client()
         key = f"session:{session_id}"
         client.delete(key)
         return True
-    except redis.exceptions.ConnectionError as e:
-        raise ConnectionError(f"Redis connection failed: {str(e)}")
     except Exception as e:
         raise RuntimeError(f"Failed to delete session: {str(e)}")

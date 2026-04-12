@@ -122,8 +122,7 @@ def _get_provider():
         log.info("Using PQC crypto provider (liboqs)")
         return PQCCryptoProvider()
     except (ImportError, Exception) as e:
-        log.warning("PQC init failed (%s). Falling back to MOCK.", e)
-        return MockCryptoProvider()
+        raise RuntimeError(f"PQC initialization failed: {e}")
 
 
 _provider = _get_provider()

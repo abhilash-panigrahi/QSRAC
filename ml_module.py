@@ -47,10 +47,6 @@ def _extract_features(context_dict: dict) -> np.ndarray:
     vpn = float(context_dict.get("is_vpn", 0))
     tor = float(context_dict.get("is_tor", 0))
 
-    # derived
-    fail_rate = fail / (req + 1e-5)
-    trust_risk_ratio = trust / (geo + 0.01)
-    vpn_tor_combo = vpn * tor
 
     features = [
     hour, req, fail, geo, trust, sens, vpn, tor

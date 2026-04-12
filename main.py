@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 import uuid
 import hashlib
 import hmac
@@ -44,10 +46,18 @@ app = FastAPI(title="QSRAC", version="1.0.0")
 from middleware import QSRACMiddleware, set_signing_public_key
 app.add_middleware(QSRACMiddleware)
 
-_server_signing_private_key, _server_signing_public_key = generate_signing_keypair()
+from config import (
+    SIGNING_PRIVATE_KEY,
+    SIGNING_PUBLIC_KEY,
+    EXCHANGE_PRIVATE_KEY,
+    EXCHANGE_PUBLIC_KEY
+)
+
+_server_signing_private_key = bytes.fromhex(SIGNING_PRIVATE_KEY)
+_server_signing_public_key = bytes.fromhex(SIGNING_PUBLIC_KEY)
 set_signing_public_key(_server_signing_public_key)
-# Renamed to be algorithm-agnostic (holds either ECDH or Kyber keys)
-_server_exchange_private_key, _server_exchange_public_key = generate_exchange_keypair()
+_server_exchange_private_key = bytes.fromhex(EXCHANGE_PRIVATE_KEY)
+_server_exchange_public_key = bytes.fromhex(EXCHANGE_PUBLIC_KEY)
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
@@ -87,13 +97,10 @@ class MFAChallengeResponse(BaseModel):
 
 def access_dependency(request: Request):
     context = request.state.context
-    core_token = json.loads(request.headers.get("X-Core-Token"))
+    core_token = request.state.core_token
 
     if not validate_role(core_token):
         raise HTTPException(status_code=403, detail="Role denied")
-
-    if not validate_attributes(context):
-        raise HTTPException(status_code=403, detail="Attribute denied")
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -124,6 +131,10 @@ def test(request: Request, x_session_id: str = Header(...)):
 
     if decision in {"Block", "Deny"}:
         raise HTTPException(status_code=403, detail=f"Access {decision.lower()}ed")
+    elif decision == "Step-Up":
+        raise HTTPException(status_code=401, detail="Step-Up Authentication Required")
+    elif decision == "Restrict":
+        raise HTTPException(status_code=403, detail="Access Restricted")
 
     return {
         "msg": "ok",
@@ -310,14 +321,20 @@ async def mfa_verify(body: MFAVerifyRequest, x_session_id: str = Header(...)):
         repair_risk = "Low"
         repair_context = {
             "hour_of_day": float(datetime.now(timezone.utc).hour),
-            "request_rate": 0.0,
-            "failed_attempts": 0.0,
-            "geo_risk_score": 0.0,
-            "device_trust_score": 1.0,
-            "sensitivity_level": 1.0,
-            "is_vpn": 0.0,
-            "is_tor": 0.0,
+            "request_rate": float(session_data.get("request_rate", 0.0)),
+            "failed_attempts": float(session_data.get("failed_attempts", 0.0)),
+            "geo_risk_score": float(session_data.get("geo_risk_score", 0.0)),
+            "device_trust_score": float(session_data.get("device_trust_score", 1.0)),
+            "sensitivity_level": float(session_data.get("sensitivity_level", 1.0)),
+            "is_vpn": float(session_data.get("is_vpn", 0.0)),
+            "is_tor": float(session_data.get("is_tor", 0.0)),
         }
+        if not isinstance(repair_context, dict):
+            raise HTTPException(status_code=400, detail="Invalid MFA context")
+
+        if not set(config.REQUIRED_CONTEXT_KEYS).issubset(repair_context.keys()):
+            raise HTTPException(status_code=400, detail="Incomplete MFA context")
+        repair_context = {k: float(v) for k, v in repair_context.items()}
 
         envelope_hash, _ = generate_envelope(
             session_key=session_key,
@@ -335,6 +352,7 @@ async def mfa_verify(body: MFAVerifyRequest, x_session_id: str = Header(...)):
             new_hash=envelope_hash,
             prev_hash=prev_hash,
             current_time=datetime.now(timezone.utc).timestamp(),
+            trust=adjusted_trust
         )
         if result != "OK":
             raise HTTPException(status_code=403, detail=f"Gate rejected repair: {result}")
@@ -371,9 +389,6 @@ async def mfa_verify(body: MFAVerifyRequest, x_session_id: str = Header(...)):
         "envelope": envelope_hash,
         "trust": adjusted_trust,
     }
-
-
-
 
 if __name__ == "__main__":
     import uvicorn

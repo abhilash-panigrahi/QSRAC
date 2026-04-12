@@ -25,3 +25,28 @@
 {"timestamp": "2026-04-11T20:55:49.463731+00:00", "session_id": "eba8d139-8a9b-46e4-889b-c5b7083de57f", "decision": "REPAIR", "risk": "Low", "trust": 0.904977930860976, "status": "OK"}
 {"timestamp": "2026-04-11T21:16:41.139511+00:00", "session_id": "742c77a2-e8b5-45d9-aeba-a8d20ddaf04b", "decision": "REPAIR", "risk": "Low", "trust": 0.8635374910218634, "status": "OK"}
 {"timestamp": "2026-04-12T08:24:47.172260+00:00", "session_id": "31550327-8889-4006-9c82-60a6ad203f91", "decision": "REPAIR", "risk": "Low", "trust": 0.9286421106514493, "status": "OK"}
+{"timestamp": "2026-04-12T10:13:25.605745+00:00", "session_id": "dab34147-abb0-4f0f-8efb-ef4c396b9225", "decision": "REPAIR", "risk": "Low", "trust": 0.7193340783157325, "status": "OK"}
+{"timestamp": "2026-04-12T13:34:42.925549+00:00", "session_id": "428d0fd4-766b-4d01-bfe1-7afd1ab1c98d", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:34:42.930977+00:00", "session_id": "428d0fd4-766b-4d01-bfe1-7afd1ab1c98d", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:34:42.935252+00:00", "session_id": "428d0fd4-766b-4d01-bfe1-7afd1ab1c98d", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:34:42.940594+00:00", "session_id": "428d0fd4-766b-4d01-bfe1-7afd1ab1c98d", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:34:42.945846+00:00", "session_id": "428d0fd4-766b-4d01-bfe1-7afd1ab1c98d", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:38:40.086973+00:00", "session_id": "5d240128-45ba-4451-b1e9-d0b555f3a401", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:38:40.092698+00:00", "session_id": "5d240128-45ba-4451-b1e9-d0b555f3a401", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:38:40.097042+00:00", "session_id": "5d240128-45ba-4451-b1e9-d0b555f3a401", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:38:40.101709+00:00", "session_id": "5d240128-45ba-4451-b1e9-d0b555f3a401", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:38:40.106234+00:00", "session_id": "5d240128-45ba-4451-b1e9-d0b555f3a401", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:39:34.688844+00:00", "session_id": "34ddedd9-6b20-4ae6-88ae-a8992fd968a3", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:39:34.694498+00:00", "session_id": "34ddedd9-6b20-4ae6-88ae-a8992fd968a3", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:39:34.699961+00:00", "session_id": "34ddedd9-6b20-4ae6-88ae-a8992fd968a3", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:39:34.705121+00:00", "session_id": "34ddedd9-6b20-4ae6-88ae-a8992fd968a3", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:39:34.710467+00:00", "session_id": "34ddedd9-6b20-4ae6-88ae-a8992fd968a3", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+{"timestamp": "2026-04-12T13:39:34.731223+00:00", "session_id": "34ddedd9-6b20-4ae6-88ae-a8992fd968a3", "decision": "REPAIR", "risk": "Low", "trust": 1.0, "status": "OK"}
+2026-04-12 19:44:32,524 {"timestamp": "2026-04-12T14:14:32.524359+00:00", "session_id": "b0d9164b-c6a2-4b79-bacd-eb07830a3e5f", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+2026-04-12 19:44:32,529 {"timestamp": "2026-04-12T14:14:32.529008+00:00", "session_id": "b0d9164b-c6a2-4b79-bacd-eb07830a3e5f", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+2026-04-12 19:44:32,534 {"timestamp": "2026-04-12T14:14:32.534573+00:00", "session_id": "b0d9164b-c6a2-4b79-bacd-eb07830a3e5f", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.0, "status": "OK"}
+2026-04-12 19:44:32,554 {"timestamp": "2026-04-12T14:14:32.553976+00:00", "session_id": "b0d9164b-c6a2-4b79-bacd-eb07830a3e5f", "decision": "REPAIR", "risk": "Low", "trust": 1.0, "status": "OK"}
+2026-04-12 19:54:11,575 {"timestamp": "2026-04-12T14:24:11.575256+00:00", "session_id": "9986ee95-9757-480d-bcc6-f241c54125dd", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.997715, "status": "OK"}
+2026-04-12 19:54:11,587 {"timestamp": "2026-04-12T14:24:11.587513+00:00", "session_id": "9986ee95-9757-480d-bcc6-f241c54125dd", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.995717, "status": "OK"}
+2026-04-12 19:54:11,597 {"timestamp": "2026-04-12T14:24:11.597762+00:00", "session_id": "9986ee95-9757-480d-bcc6-f241c54125dd", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.994206, "status": "OK"}
+2026-04-12 19:54:11,615 {"timestamp": "2026-04-12T14:24:11.615844+00:00", "session_id": "9986ee95-9757-480d-bcc6-f241c54125dd", "decision": "REPAIR", "risk": "Low", "trust": 1.0, "status": "OK"}

@@ -1,12 +1,13 @@
 import requests
 import hashlib
-from crypto_provider import generate_exchange_keypair, kem_decapsulate
-from crypto_provider import verify
+import hmac
+import json
+from crypto_provider import generate_exchange_keypair, kem_decapsulate, verify
+from envelope import generate_envelope
 
 class QSRACClient:
     def __init__(self, base_url):
-        self.base_url = base_url
-
+        self.base_url = base_url.rstrip("/")
         self.priv, self.pub = generate_exchange_keypair()
 
         self.session_id = None
@@ -14,8 +15,10 @@ class QSRACClient:
         self.seq = 0
         self.envelope = hashlib.sha256(b"init").hexdigest()
         self.core_token = None
+        self.core_token_hash = None # Cached for deterministic envelope generation
 
     def login(self, username):
+        """Authenticates and establishes the initial QSRAC state."""
         r = requests.post(f"{self.base_url}/login", json={
             "username": username,
             "client_public_key": self.pub.hex()
@@ -23,23 +26,30 @@ class QSRACClient:
 
         self.session_id = r["session_id"]
         self.core_token = r["core_token"]
+        
+        # Issue 1: Derive and store core token hash for state chain
+        self.core_token_hash = hashlib.sha256(self.core_token.encode("utf-8")).hexdigest()
+
+        # Verify Server Signature
         signing_pub = bytes.fromhex(r["signing_public_key"])
-        token_bytes = self.core_token.encode("utf-8")
-        if "token_signature" not in r:
-            raise Exception("Missing server signature")
+        signature = bytes.fromhex(r.get("token_signature", ""))
+        
+        if not signature or not verify(signature, self.core_token.encode("utf-8"), signing_pub):
+            raise Exception("CRITICAL: Invalid server signature on core token")
 
-        signature = bytes.fromhex(r["token_signature"])
-
-        if not verify(signature, token_bytes, signing_pub):
-            raise Exception("Invalid server signature")
-
+        # Establish Session Key via KEM
         ciphertext = bytes.fromhex(r["kem_ciphertext"])
         self.session_key = kem_decapsulate(self.priv, ciphertext)
 
+        # Sync Initial State
         self.seq = r["seq"]
         self.envelope = r["init_envelope"]
 
     def request(self, path, context):
+        """
+        Executes an authenticated request and evolves the authorization state.
+        Handles state synchronization even on 403 Forbidden responses.
+        """
         headers = {
             "X-Session-ID": self.session_id,
             "X-Core-Token": self.core_token,
@@ -47,50 +57,49 @@ class QSRACClient:
             "X-QSRAC-Envelope": self.envelope,
         }
 
+        # Dynamically map context to protocol headers
         for k, v in context.items():
             headers[f"X-{k.replace('_','-')}"] = str(v)
 
         r = requests.get(f"{self.base_url}{path}", headers=headers)
 
-        # 🔥 CRITICAL FIX: Sync state on ALL responses (200 + 403)
+        # 🔥 STATE SYNCHRONIZATION: Evolution must happen on ALL successful gate checks (200, 403)
         if "X-QSRAC-Seq" in r.headers and "X-QSRAC-Envelope" in r.headers:
             new_seq = int(r.headers["X-QSRAC-Seq"])
             new_env = r.headers["X-QSRAC-Envelope"]
+            trust_signal = float(r.headers["X-QSRAC-Trust"])
+            risk_signal = r.headers["X-QSRAC-Risk"]
 
-            from envelope import generate_envelope
-
+            # Validate the new state using fixed-point arithmetic
             expected_hash, _ = generate_envelope(
-                self.session_key,
-                hashlib.sha256(self.core_token.encode()).hexdigest(),
-                r.headers["X-QSRAC-Risk"],  # no fallback
-                context,
-                self.envelope,
-                float(r.headers["X-QSRAC-Trust"]),
-                new_seq,
+                session_key=self.session_key,
+                core_token_hash=self.core_token_hash,
+                risk=risk_signal,
+                context=context,
+                prev_hash=self.envelope,
+                trust=trust_signal, # envelope.py handles fixed-point conversion internally
+                seq=new_seq
             )
 
             if new_env != expected_hash:
-                raise Exception("CRITICAL: Server state verification failed")
+                raise Exception("CRITICAL: Server state integrity verification failed (Tampering Detected)")
 
-            # ✅ ALWAYS update state (even on 403)
+            # Update local state machine
             self.seq = new_seq
             self.envelope = new_env
 
         return r
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Integration Test Script
+# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     client = QSRACClient("http://127.0.0.1:8000")
 
-    print("Logging in...")
+    print("[1/6] Establishing Quantum-Safe Session...")
     client.login("test_user")
 
-    print("Session ID:", client.session_id)
-    print("Seq:", client.seq)
-    print("Envelope:", client.envelope)
-
-    # ─────────────────────────────
-    # 1. NORMAL REQUEST
-    # ─────────────────────────────
+    # Standard Operational Context
     context = {
         "hour_of_day": 12,
         "request_rate": 1.0,
@@ -102,76 +111,42 @@ if __name__ == "__main__":
         "is_tor": 0
     }
 
-    print("\nNormal request...")
+    print("[2/6] Baseline Request...")
     res = client.request("/test", context)
-    print(res.json())
+    print(f"Status: {res.status_code} | Trust: {res.headers.get('X-QSRAC-Trust')}")
 
-    # ─────────────────────────────
-    # 2. FORCE LOW TRUST
-    # ─────────────────────────────
-    context_attack = {
-        "hour_of_day": 3,
-        "request_rate": 15.0,
-        "failed_attempts": 8,
-        "geo_risk_score": 0.9,
-        "device_trust_score": 0.2,
-        "sensitivity_level": 5,
-        "is_vpn": 1,
-        "is_tor": 1
-    }
-
-    print("\nTriggering low trust...")
-    for _ in range(5):
+    print("[3/6] Inducing Trust Decay (High Sensitivity Attack)...")
+    context_attack = context.copy()
+    context_attack.update({"sensitivity_level": 5, "request_rate": 20.0, "is_tor": 1})
+    
+    for i in range(3):
         res = client.request("/test", context_attack)
-        print(res.status_code, res.text)
+        print(f"Attempt {i+1}: {res.status_code} | Mode: {res.headers.get('X-QSRAC-Mode')}")
 
-    # ─────────────────────────────
-    # 3. MFA CHALLENGE
-    # ─────────────────────────────
-    import requests, hmac, hashlib
+    print("[4/6] Solving MFA Challenge...")
+    res_mfa = requests.post(f"{client.base_url}/mfa/challenge", 
+                            headers={"X-Session-ID": client.session_id}).json()
+    
+    # Solve challenge using established Session Key
+    msg = (res_mfa["nonce"] + str(res_mfa["timestamp"])).encode()
+    response_hmac = hmac.new(client.session_key, msg, hashlib.sha256).hexdigest()
 
-    print("\nRequesting MFA challenge...")
-    res = requests.post(
-        "http://127.0.0.1:8000/mfa/challenge",
-        headers={"X-Session-ID": client.session_id}
-    )
-    challenge = res.json()
-    print("Challenge:", challenge)
-
-    # ─────────────────────────────
-    # 4. SOLVE MFA
-    # ─────────────────────────────
-    nonce = challenge["nonce"]
-    timestamp = challenge["timestamp"]
-
-    msg = (nonce + str(timestamp)).encode()
-    response = hmac.new(client.session_key, msg, hashlib.sha256).hexdigest()
-
-    # ─────────────────────────────
-    # 5. VERIFY MFA
-    # ─────────────────────────────
-    print("\nVerifying MFA...")
-    res = requests.post(
-        "http://127.0.0.1:8000/mfa/verify",
+    print("[5/6] Verifying MFA & Recovering State...")
+    res_verify = requests.post(
+        f"{client.base_url}/mfa/verify",
         headers={"X-Session-ID": client.session_id},
         json={
-            "nonce": nonce,
-            "response": response,
-            "timestamp": timestamp
+            "nonce": res_mfa["nonce"],
+            "response": response_hmac,
+            "timestamp": res_mfa["timestamp"]
         }
-    )
+    ).json()
 
-    result = res.json()
+    # 🔥 SYNC: Recover state machine from MFA completion
+    client.seq = res_verify["seq"]
+    client.envelope = res_verify["envelope"]
+    print(f"MFA Success. New Seq: {client.seq}")
 
-    print("MFA result:", result)
-
-    # 🔥 FINAL CRITICAL FIX: sync state after MFA
-    client.seq = result["seq"]
-    client.envelope = result["envelope"]
-
-    # ─────────────────────────────
-    # 6. CONFIRM RECOVERY
-    # ─────────────────────────────
-    print("\nPost-MFA request...")
-    res = client.request("/test", context)
-    print(res.json())
+    print("[6/6] Confirming Access Recovery...")
+    res_final = client.request("/test", context)
+    print(f"Final Status: {res_final.status_code} (Expected 200)")
