@@ -60,7 +60,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
                     }
 
                     trust_value = float(session_data.get("trust", 1.0))
-
+                    context = {k: float(v) for k, v in context.items()}
                     envelope_hash, _ = generate_envelope(
                         bytes.fromhex(session_data["session_key"]),
                         session_data["core_token_hash"],
@@ -99,6 +99,8 @@ class QSRACMiddleware(BaseHTTPMiddleware):
                 except ValueError as e:
                     await log_event_async(session_id, "Reject", str(e), 0.0)
                     return JSONResponse(status_code=403, content={"error": str(e)})
+                except (ConnectionError, RuntimeError) as e:
+                    return JSONResponse(status_code=503, content={"error": "Backend unavailable"})
                 except Exception as e:
                     await log_event_async(session_id or "UNKNOWN", "Reject", "StateProgressionError", 0.0)
                     log.error(f"State progression failed: {str(e)}")
@@ -120,7 +122,33 @@ class QSRACMiddleware(BaseHTTPMiddleware):
                     separators=(",", ":")
                 )
             except json.JSONDecodeError:
-                await log_event_async(session_id, "Reject", "InvalidTokenJSON", 0.0)
+                session_data = get_session(session_id)
+                next_seq = int(session_data["seq"]) + 1
+                current_time = time.time()
+                trust_value = float(session_data.get("trust", 1.0))
+
+                context = {k: float(session_data.get(k, 0.0)) for k in REQUIRED_CONTEXT_KEYS}
+
+                envelope_hash, _ = generate_envelope(
+                    bytes.fromhex(session_data["session_key"]),
+                    session_data["core_token_hash"],
+                    "Medium",
+                    context,
+                    session_data["last_hash_1"],
+                    trust_value,
+                    next_seq
+                )
+
+                validate_and_update(
+                    session_id,
+                    next_seq,
+                    envelope_hash,
+                    session_data["last_hash_1"],
+                    current_time,
+                    trust_value
+                )
+
+                await log_event_async(session_id, "Reject", "InvalidTokenJSON", trust_value)
                 return JSONResponse(status_code=400, content={"error": "Invalid Core Token JSON"})
 
             # Verify cryptographic signature
@@ -131,9 +159,33 @@ class QSRACMiddleware(BaseHTTPMiddleware):
             
             token_signature = bytes.fromhex(token_signature_hex)
             if not verify_token(token_signature, core_token_canonical.encode("utf-8"), _server_signing_public_key):
-                await log_event_async(session_id, "Reject", "InvalidSignature", 0.0)
-                return JSONResponse(status_code=401, content={"error": "Core token signature invalid"})
+                next_seq = int(session_data["seq"]) + 1
+                current_time = time.time()
+                trust_value = float(session_data.get("trust", 1.0))
 
+                context = {k: float(session_data.get(k, 0.0)) for k in REQUIRED_CONTEXT_KEYS}
+
+                envelope_hash, _ = generate_envelope(
+                    bytes.fromhex(session_data["session_key"]),
+                    session_data["core_token_hash"],
+                    "Medium",
+                    context,
+                    session_data["last_hash_1"],
+                    trust_value,
+                    next_seq
+                )
+
+                validate_and_update(
+                    session_id,
+                    next_seq,
+                    envelope_hash,
+                    session_data["last_hash_1"],
+                    current_time,
+                    trust_value
+                )
+
+                await log_event_async(session_id, "Reject", "InvalidSignature", trust_value)
+                return JSONResponse(status_code=401, content={"error": "Core token signature invalid"})
             # 2. Context Extraction & ABAC Gating
             context = {
                 k[2:].replace("-", "_").lower(): float(v) 
@@ -341,9 +393,9 @@ class QSRACMiddleware(BaseHTTPMiddleware):
         except ValueError as e:
             await log_event_async(session_id or "UNKNOWN", "Reject", str(e), 0.0)
             return JSONResponse(status_code=401, content={"error": str(e)})
-        except ConnectionError:
+        except (ConnectionError, RuntimeError):
             await log_event_async(session_id or "UNKNOWN", "Reject", "BackendUnavailable", 0.0)
-            return JSONResponse(status_code=503, content={"error": "Security backend unreachable"})
+            return JSONResponse(status_code=503, content={"error": "Backend unavailable"})
         except Exception as e:
             await log_event_async(session_id or "UNKNOWN", "Reject", "InternalError", 0.0)
             log.error(f"Middleware Error: {str(e)}")

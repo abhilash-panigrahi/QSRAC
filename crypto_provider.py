@@ -61,53 +61,53 @@ class MockCryptoProvider(CryptoProvider):
 # ─────────────────────────────────────────────
 
 class PQCCryptoProvider(CryptoProvider):
-
     def __init__(self):
         import oqs
-
-        # NIST standard mapping:
-        # ML-DSA-44 → Dilithium2
-        # ML-KEM-512 → Kyber512
-        self.sig_alg = "Dilithium2"
-        self.kem_alg = "Kyber512"
         self.oqs = oqs
 
-    # ── SIGNING (ML-DSA) ──────────────────────
+        sigs = oqs.get_enabled_sig_mechanisms()
+        self.sig_alg = next((s for s in sigs if "ML-DSA-44" in s or "Dilithium2" in s), None)
 
+        kems = oqs.get_enabled_kem_mechanisms()
+        self.kem_alg = next((k for k in kems if "ML-KEM-512" in k or "Kyber512" in k), None)
+
+        if not self.sig_alg or not self.kem_alg:
+            raise RuntimeError("Required PQC algorithms not found")
+
+        # 🔥 STATEFUL OBJECTS (FIX)
+        self.signer = oqs.Signature(self.sig_alg)
+        self.kem = oqs.KeyEncapsulation(self.kem_alg)
+
+        # 🔥 GENERATE ONCE — KEEP IN MEMORY
+        self.signing_public_key = self.signer.generate_keypair()
+        self.exchange_public_key = self.kem.generate_keypair()
+
+        log.info(f"PQC initialized (STATEFUL) Sig: {self.sig_alg}, KEM: {self.kem_alg}")
+
+    # ── SIGNING ──────────────────────
     def generate_signing_keypair(self):
-        with self.oqs.Signature(self.sig_alg) as signer:
-            public_key = signer.generate_keypair()
-            private_key = signer.export_secret_key()
-        return private_key, public_key
+        # return only public (private stays internal)
+        return None, self.signing_public_key
 
     def sign(self, private_key, data: bytes) -> bytes:
-        # Key-specific instance (safe, avoids reuse issues)
-        with self.oqs.Signature(self.sig_alg, secret_key=private_key) as signer:
-            return signer.sign(data)
+        return self.signer.sign(data)
 
     def verify(self, signature: bytes, data: bytes, public_key) -> bool:
         try:
-            with self.oqs.Signature(self.sig_alg) as verifier:
-                return verifier.verify(data, signature, public_key)
+            verifier = self.oqs.Signature(self.sig_alg)
+            return verifier.verify(data, signature, public_key)
         except Exception:
             return False
 
-    # ── KEM (ML-KEM) ──────────────────────────
-
+    # ── KEM ──────────────────────────
     def generate_exchange_keypair(self):
-        with self.oqs.KeyEncapsulation(self.kem_alg) as kem:
-            public_key = kem.generate_keypair()
-            private_key = kem.export_secret_key()
-        return private_key, public_key
+        return None, self.exchange_public_key
 
     def kem_encapsulate(self, peer_public_key: bytes):
-        with self.oqs.KeyEncapsulation(self.kem_alg) as kem:
-            return kem.encap_secret(peer_public_key)  # (ciphertext, shared_secret)
+        return self.kem.encap_secret(peer_public_key)
 
-    def kem_decapsulate(self, private_key: bytes, ciphertext: bytes):
-        with self.oqs.KeyEncapsulation(self.kem_alg, secret_key=private_key) as kem:
-            return kem.decap_secret(ciphertext)
-
+    def kem_decapsulate(self, private_key, ciphertext: bytes):
+        return self.kem.decap_secret(ciphertext)
 
 # ─────────────────────────────────────────────
 # PROVIDER SELECTOR (FAIL-SAFE)
@@ -149,6 +149,9 @@ def kem_encapsulate(peer_public_key: bytes):
 
 def kem_decapsulate(private_key: bytes, ciphertext: bytes):
     return _provider.kem_decapsulate(private_key, ciphertext)
+
+def get_signing_public_key():
+    return _provider.signing_public_key
 
 
 # ─────────────────────────────────────────────

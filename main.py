@@ -25,6 +25,8 @@ from crypto_provider import (
     serialize_exchange_public_key,
     sign_token
 )
+
+
 from envelope import generate_envelope
 from redis_lua import (
     create_session,
@@ -46,19 +48,13 @@ app = FastAPI(title="QSRAC", version="1.0.0")
 from middleware import QSRACMiddleware, set_signing_public_key
 app.add_middleware(QSRACMiddleware)
 
-from config import (
-    SIGNING_PRIVATE_KEY,
-    SIGNING_PUBLIC_KEY,
-    EXCHANGE_PRIVATE_KEY,
-    EXCHANGE_PUBLIC_KEY
-)
+from crypto_provider import get_signing_public_key
+_server_signing_public_key = get_signing_public_key()
+_, _server_exchange_public_key = generate_exchange_keypair()
 
-_server_signing_private_key = bytes.fromhex(SIGNING_PRIVATE_KEY)
-_server_signing_public_key = bytes.fromhex(SIGNING_PUBLIC_KEY)
 set_signing_public_key(_server_signing_public_key)
-_server_exchange_private_key = bytes.fromhex(EXCHANGE_PRIVATE_KEY)
-_server_exchange_public_key = bytes.fromhex(EXCHANGE_PUBLIC_KEY)
 
+_server_signing_private_key, _ = generate_signing_keypair()
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
 
@@ -174,6 +170,8 @@ def login(request: LoginRequest):
 
         try:
             token_signature = sign_token(_server_signing_private_key, core_token_bytes)
+        except (ConnectionError, RuntimeError):
+            raise HTTPException(status_code=503, detail="Backend unavailable")
         except Exception:
             raise Exception("Token signing failed")       
         
@@ -227,11 +225,14 @@ def login(request: LoginRequest):
             expires_in=SESSION_TTL,
         )
 
+    except HTTPException:
+        raise
+    except (ConnectionError, RuntimeError):
+        raise HTTPException(status_code=503, detail="Backend unavailable")
     except Exception as e:
         log.error("Login failed for user %r: %s", request.username, e)
         raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
-
-
+    
 # ── MFA endpoints ──────────────────────────────────────────────────────────────
 
 @app.post("/mfa/challenge", response_model=MFAChallengeResponse)
@@ -245,6 +246,8 @@ def mfa_challenge(x_session_id: str = Header(...)):
         session_key = bytes.fromhex(session_data["session_key"])
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except (ConnectionError, RuntimeError):
+        raise HTTPException(status_code=503, detail="Backend unavailable")
     except Exception as e:
         log.error("mfa_challenge session fetch failed [%s]: %s", x_session_id, e)
         raise HTTPException(status_code=500, detail=f"Challenge failed: {str(e)}")
@@ -292,6 +295,8 @@ async def mfa_verify(body: MFAVerifyRequest, x_session_id: str = Header(...)):
         session_key = bytes.fromhex(session_data["session_key"])
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except (ConnectionError, RuntimeError):
+        raise HTTPException(status_code=503, detail="Backend unavailable")
     except Exception as e:
         log.error("mfa_verify session fetch failed [%s]: %s", x_session_id, e)
         raise HTTPException(status_code=500, detail=f"Session fetch failed: {str(e)}")

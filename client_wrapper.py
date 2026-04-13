@@ -2,7 +2,8 @@ import requests
 import hashlib
 import hmac
 import json
-from crypto_provider import generate_exchange_keypair, kem_decapsulate, verify
+from crypto_provider import generate_exchange_keypair, kem_decapsulate
+import oqs
 from envelope import generate_envelope
 
 class QSRACClient:
@@ -34,8 +35,10 @@ class QSRACClient:
         signing_pub = bytes.fromhex(r["signing_public_key"])
         signature = bytes.fromhex(r.get("token_signature", ""))
         
-        if not signature or not verify(signature, self.core_token.encode("utf-8"), signing_pub):
-            raise Exception("CRITICAL: Invalid server signature on core token")
+        sig_alg = next(s for s in oqs.get_enabled_sig_mechanisms() if "ML-DSA-44" in s or "Dilithium2" in s)
+        with oqs.Signature(sig_alg) as verifier:
+            if not signature or not verifier.verify(self.core_token.encode("utf-8"), signature, signing_pub):
+                raise Exception("CRITICAL: Invalid server signature on core token")
 
         # Establish Session Key via KEM
         ciphertext = bytes.fromhex(r["kem_ciphertext"])
@@ -58,6 +61,7 @@ class QSRACClient:
         }
 
         # Dynamically map context to protocol headers
+        context = {k: float(v) for k, v in context.items()}
         for k, v in context.items():
             headers[f"X-{k.replace('_','-')}"] = str(v)
 
@@ -68,7 +72,7 @@ class QSRACClient:
             new_seq = int(r.headers["X-QSRAC-Seq"])
             new_env = r.headers["X-QSRAC-Envelope"]
             trust_signal = float(r.headers["X-QSRAC-Trust"])
-            risk_signal = r.headers["X-QSRAC-Risk"]
+            risk_signal = str(r.headers["X-QSRAC-Risk"])
 
             # Validate the new state using fixed-point arithmetic
             expected_hash, _ = generate_envelope(
@@ -76,7 +80,7 @@ class QSRACClient:
                 core_token_hash=self.core_token_hash,
                 risk=risk_signal,
                 context=context,
-                prev_hash=self.envelope,
+                prev_hash=headers["X-QSRAC-Envelope"],
                 trust=trust_signal, # envelope.py handles fixed-point conversion internally
                 seq=new_seq
             )

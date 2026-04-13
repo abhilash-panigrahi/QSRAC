@@ -92,11 +92,13 @@ def validate_and_update(session_id: str, seq: int, new_hash: str, prev_hash: str
         sha = load_lua_script()
         key = f"session:{session_id}"
         
-        # Issue 4: Ensure trust is passed as a float for Lua tonumber()
         result = client.evalsha(sha, 1, key, seq, new_hash, prev_hash, current_time, float(trust))
         
-        # Refresh TTL only on gate success
-        client.expire(key, SESSION_TTL)
+        try:
+            client.expire(key, SESSION_TTL)
+        except redis.exceptions.ConnectionError:
+            # State already committed — do NOT fail request
+            pass
         return result
         
     except redis.exceptions.ResponseError as e:
@@ -113,9 +115,9 @@ def validate_and_update(session_id: str, seq: int, new_hash: str, prev_hash: str
         else:
             raise ValueError(f"REDIS_ERROR: {error_msg}")
     except redis.exceptions.ConnectionError as e:
-        raise ConnectionError(f"Redis connection failed: {str(e)}")
+        raise ConnectionError(f"REDIS_UNAVAILABLE: {str(e)}")
     except Exception as e:
-        raise RuntimeError(f"Unexpected Redis error: {str(e)}")
+        raise RuntimeError(f"REDIS_UNAVAILABLE: {str(e)}")
 
 def create_session(session_id: str, core_token_hash: str, session_key: str, ttl: int) -> bool:
     """Initializes session hash and sets TTL atomically."""
