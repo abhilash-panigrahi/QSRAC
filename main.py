@@ -255,7 +255,7 @@ def mfa_challenge(x_session_id: str = Header(...)):
     nonce = uuid.uuid4().hex
     timestamp = datetime.now(timezone.utc).timestamp()
 
-    challenge_input = (nonce + str(timestamp)).encode("utf-8")
+    challenge_input = (nonce + f"{timestamp:.6f}").encode("utf-8")
     challenge = hmac.new(session_key, challenge_input, hashlib.sha256).hexdigest()
 
     try:
@@ -301,7 +301,7 @@ async def mfa_verify(body: MFAVerifyRequest, x_session_id: str = Header(...)):
         log.error("mfa_verify session fetch failed [%s]: %s", x_session_id, e)
         raise HTTPException(status_code=500, detail=f"Session fetch failed: {str(e)}")
 
-    challenge_input = (body.nonce + str(body.timestamp)).encode("utf-8")
+    challenge_input = (body.nonce + f"{body.timestamp:.6f}").encode("utf-8")
     expected = hmac.new(session_key, challenge_input, hashlib.sha256).hexdigest()
 
     if not hmac.compare_digest(expected, body.response):

@@ -373,7 +373,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
             result = validate_and_update(session_id, next_seq, envelope_hash, client_env, current_time, trust_value)
             if result != "OK":
                 await log_event_async(session_id, "Reject", result, trust_value)
-                return JSONResponse(status_code=403, content={"error": f"Gate rejected update: {result}"})
+                return self._finalize_response(JSONResponse(status_code=403, content={"error": result}),risk_level,trust_value,None,None)
 
             # 5. Policy Execution
             decision = evaluate_policy(risk_level, trust_value)
