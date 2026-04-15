@@ -21,7 +21,6 @@ def _require(name: str) -> str:
         )
     return value
 
-
 def _optional(name: str, default: str) -> str:
     return os.getenv(name, default).strip() or default
 
@@ -56,10 +55,10 @@ APP_PORT: int = int(_optional("APP_PORT", "8000"))
 
 SESSION_TTL: int = int(_optional("SESSION_TTL", "3600"))
 
-# Issue 3 Fix: Multiplier to convert floats to stable integers for deterministic hashing
+# Multiplier to convert floats to stable integers for deterministic hashing
 PRECISION_MULTIPLIER: int = 1_000_000 
 
-# Polish 3 Fix: Centralized audit log path
+# Centralized audit log path
 AUDIT_LOG_PATH: str = _optional("AUDIT_LOG_PATH", "audit.log")
 
 # Protocol Metadata for middleware validation
@@ -70,11 +69,24 @@ REQUIRED_CONTEXT_KEYS = [
 
 
 # ── 4. Risk ML Thresholds ─────────────────────────────────────────────────────
-# NOTE: thresholds must satisfy: LOW > MEDIUM > HIGH (scores are negative)
 
-RISK_THRESHOLD_LOW: float    = float(_optional("RISK_THRESHOLD_LOW", "-0.4449"))
-RISK_THRESHOLD_MEDIUM: float = float(_optional("RISK_THRESHOLD_MEDIUM", "-0.5381"))
-RISK_THRESHOLD_HIGH: float   = float(_optional("RISK_THRESHOLD_HIGH", "-0.6313"))
+USE_DYNAMIC_THRESHOLDS: bool = _optional("USE_DYNAMIC_THRESHOLDS", "True").lower() == "true"
+
+# Thresholds represent percentile-based risk cutoffs derived from training data.
+# low    → ≥ 70th percentile (safe behavior)
+# medium → ≥ 50th percentile
+# high   → ≥ 30th percentile
+# below  → critical risk
+
+# NOTE: thresholds must satisfy: LOW > MEDIUM > HIGH
+RISK_THRESHOLD_LOW: float    = float(_optional("RISK_THRESHOLD_LOW", "0.7"))
+RISK_THRESHOLD_MEDIUM: float = float(_optional("RISK_THRESHOLD_MEDIUM", "0.5"))
+RISK_THRESHOLD_HIGH: float   = float(_optional("RISK_THRESHOLD_HIGH", "0.3"))
+
+# Clamp thresholds into valid probability range [0.0, 1.0]
+RISK_THRESHOLD_LOW = max(min(RISK_THRESHOLD_LOW, 1.0), 0.0)
+RISK_THRESHOLD_MEDIUM = max(min(RISK_THRESHOLD_MEDIUM, 1.0), 0.0)
+RISK_THRESHOLD_HIGH = max(min(RISK_THRESHOLD_HIGH, 1.0), 0.0)
 
 # Fail-fast security gate
 if not (RISK_THRESHOLD_LOW > RISK_THRESHOLD_MEDIUM > RISK_THRESHOLD_HIGH):

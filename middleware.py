@@ -1,6 +1,7 @@
 import time
 import json
 import logging
+import numpy as np
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -112,7 +113,6 @@ class QSRACMiddleware(BaseHTTPMiddleware):
             # 1. Session Fetch & Token Verification
             session_data = get_session(session_id)
             
-            # Issue 1: Standardized Token Parsing for main.py
             try:
                 core_token_dict = json.loads(core_token_raw)
                 request.state.core_token = core_token_dict
@@ -186,16 +186,63 @@ class QSRACMiddleware(BaseHTTPMiddleware):
 
                 await log_event_async(session_id, "Reject", "InvalidSignature", trust_value)
                 return JSONResponse(status_code=401, content={"error": "Core token signature invalid"})
+            
             # 2. Context Extraction & ABAC Gating
-            context = {
-                k[2:].replace("-", "_").lower(): float(v) 
-                for k, v in request.headers.items() 
-                if k.lower().startswith("x-") and k[2:].replace("-", "_").lower() in REQUIRED_CONTEXT_KEYS
+            context = {}
+            
+            defaults = {
+                "request_rate": 1.0,
+                "failed_attempts": 0.0,
+                "geo_risk_score": 0.0,
+                "device_trust_score": 1.0,
+                "sensitivity_level": 1.0,
+                "is_vpn": 0.0,
+                "is_tor": 0.0
             }
 
-            if not set(REQUIRED_CONTEXT_KEYS).issubset(context.keys()):
-                await log_event_async(session_id, "Reject", "IncompleteContext", 0.0)
-                return JSONResponse(status_code=400, content={"error": "Incomplete QSRAC context"})
+            bounds = {
+                "hour_of_day": (0, 23),
+                "request_rate": (0, 20),
+                "failed_attempts": (0, 10),
+                "geo_risk_score": (0, 1),
+                "device_trust_score": (0, 1),
+                "sensitivity_level": (1, 5),
+                "is_vpn": (0, 1),
+                "is_tor": (0, 1)
+            }
+
+            # Calculate once per request
+            current_hour = float(datetime.now(timezone.utc).hour)
+
+            for key in REQUIRED_CONTEXT_KEYS:
+                header_name = f"x-{key.replace('_', '-')}".lower()
+                raw_value = request.headers.get(header_name)
+                
+                if isinstance(raw_value, str):
+                    raw_value = raw_value.strip()
+
+                try:
+                    value = float(raw_value) if raw_value is not None else None
+                    if value is not None and (np.isnan(value) or np.isinf(value)):
+                        value = None
+                except (ValueError, TypeError):
+                    value = None
+
+                # Apply defaults
+                if value is None:
+                    if key == "hour_of_day":
+                        value = current_hour
+                    else:
+                        value = defaults[key]
+
+                # Safety bounds
+                low, high = bounds[key]
+                value = max(min(value, high), low)
+
+                context[key] = value
+
+            context = {k: float(v) for k, v in context.items()}
+            log.debug(f"[CONTEXT] {context}")
 
             request.state.context = context
 
@@ -255,7 +302,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
                     envelope_hash
                 )
 
-            # 4. Fast Path State Evolution (Issue 4 Integration)
+            # 4. Fast Path State Evolution
             client_seq = int(request.headers.get("X-QSRAC-Seq", -1))
             client_env = request.headers.get("X-QSRAC-Envelope")
 
