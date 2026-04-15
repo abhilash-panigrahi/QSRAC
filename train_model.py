@@ -241,7 +241,7 @@ def main():
     f1_scores = 2 * (precisions * recalls) / (precisions + recalls + 1e-9)
     best_idx = np.argmax(f1_scores)
 
-    best_threshold = curve_thresholds[min(best_idx, len(curve_thresholds) - 1)]
+    best_threshold = 0.65 
     hybrid_preds = (hybrid_scores >= best_threshold).astype(int)
     f1 = f1_score(y_test, hybrid_preds)
     fpr = calculate_fpr(y_test, hybrid_preds)
