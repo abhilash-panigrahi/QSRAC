@@ -369,7 +369,7 @@ def main():
         plt.close()
 
     # Usage integration example (to be placed at the end of the main() function):
-    # generate_evaluation_outputs(y_test, hybrid_scores, hybrid_preds, best_threshold)
+    generate_evaluation_outputs(y_test, hybrid_scores, hybrid_preds, best_threshold)
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
