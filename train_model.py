@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 import joblib
 import logging
 import json
@@ -9,7 +10,7 @@ from lightgbm import LGBMClassifier
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, confusion_matrix, roc_auc_score, precision_recall_curve
+from sklearn.metrics import roc_curve, f1_score, confusion_matrix, roc_auc_score, precision_recall_curve 
 
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
 CSV_FILES = ["dataset.csv"]  # Update this list with your actual file paths
@@ -281,6 +282,94 @@ def main():
 
     log.info(f"Model saved to '{MODEL_PATH}'")
     log.info(f"Thresholds saved to '{THRESHOLDS_PATH}'")
+
+    def generate_evaluation_outputs(y_test, hybrid_scores, hybrid_preds, best_threshold):
+        """
+        Generates publication-quality evaluation metrics and plots for the QSRAC IEEE paper.
+        Expects y_test (ground truth), hybrid_scores (continuous probabilities), 
+        hybrid_preds (binary predictions), and best_threshold (float).
+        """
+        # ─── METRICS CALCULATION ────────────────────────────────────────────────
+        tn, fp, fn, tp = confusion_matrix(y_test, hybrid_preds, labels=[0, 1]).ravel()
+        
+        fpr = fp / (fp + tn + 1e-9)
+        tpr = tp / (tp + fn + 1e-9)  # True Positive Rate (Detection Rate)
+        precision_val = tp / (tp + fp + 1e-9) # Added Precision
+        roc_auc = roc_auc_score(y_test, hybrid_scores)
+        f1 = f1_score(y_test, hybrid_preds)
+        
+        acc_benign = tn / (tn + fp + 1e-9)
+        acc_attack = tp / (tp + fn + 1e-9)
+
+        # 1. Save Metrics to evaluation.json
+        metrics_dict = {
+            "Optimal_Threshold": float(best_threshold),
+            "ROC_AUC": float(roc_auc),
+            "F1_Score": float(f1),
+            "Precision": float(precision_val),
+            "Recall": float(tpr),
+            "False_Positive_Rate": float(fpr),
+            "True_Positive_Rate": float(tpr),
+            "Detection_Rate": float(tpr),
+            "Per_Class_Accuracy": {
+                "Benign": float(acc_benign),
+                "Attack": float(acc_attack)
+            },
+            "Confusion_Matrix": {
+                "TN": int(tn),
+                "FP": int(fp),
+                "FN": int(fn),
+                "TP": int(tp)
+            }
+        }
+        
+        with open("evaluation.json", "w") as f:
+            json.dump(metrics_dict, f, indent=4)
+
+        # ─── PLOT GENERATION ────────────────────────────────────────────────────
+        
+        # 2. ROC Curve
+        fpr_curve, tpr_curve, _ = roc_curve(y_test, hybrid_scores)
+        plt.figure()
+        plt.plot(fpr_curve, tpr_curve, label=f"ROC Curve (AUC = {roc_auc:.4f})")
+        plt.plot([0, 1], [0, 1], linestyle="--", label="Random Baseline")
+        plt.xlabel("False Positive Rate")
+        plt.ylabel("True Positive Rate")
+        plt.title("Receiver Operating Characteristic")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig("roc_curve.png", dpi=300, bbox_inches="tight")
+        plt.close()
+
+        # 3. Precision-Recall Curve
+        precision_curve, recall_curve, _ = precision_recall_curve(y_test, hybrid_scores)
+        plt.figure()
+        plt.plot(recall_curve, precision_curve, label="PR Curve")
+        plt.xlabel("Recall")
+        plt.ylabel("Precision")
+        plt.title("Precision-Recall Curve")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig("precision_recall_curve.png", dpi=300, bbox_inches="tight")
+        plt.close()
+
+        # 4. Score Distribution (Benign vs Attack)
+        plt.figure()
+        benign_scores = hybrid_scores[y_test == 0]
+        attack_scores = hybrid_scores[y_test == 1]
+        
+        plt.hist(benign_scores, bins=50, alpha=0.6, label="Benign", density=True)
+        plt.hist(attack_scores, bins=50, alpha=0.6, label="Attack", density=True)
+        plt.xlabel("Hybrid Risk Score")
+        plt.ylabel("Density")
+        plt.title("Score Distribution: Benign vs. Attack")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig("score_distribution.png", dpi=300, bbox_inches="tight")
+        plt.close()
+
+    # Usage integration example (to be placed at the end of the main() function):
+    # generate_evaluation_outputs(y_test, hybrid_scores, hybrid_preds, best_threshold)
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
