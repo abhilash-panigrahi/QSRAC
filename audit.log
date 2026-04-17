@@ -117,3 +117,4 @@
 2026-04-14 18:57:21,916 {"timestamp": "2026-04-14T13:27:21.916132+00:00", "session_id": "1013d4a7-2b28-4d4d-9321-82a92c898f59", "decision": "Reject", "risk": "StateMismatch", "trust": 0.00287, "status": "OK"}
 2026-04-14 19:02:07,740 {"timestamp": "2026-04-14T13:32:07.740077+00:00", "session_id": "1013d4a7-2b28-4d4d-9321-82a92c898f59", "decision": "REPAIR", "risk": "Low", "trust": 0.202747, "status": "OK"}
 2026-04-14 19:07:43,858 {"timestamp": "2026-04-14T13:37:43.858511+00:00", "session_id": "c65f470b-bf38-4755-ad8a-13cc7bcf7b62", "decision": "Reject", "risk": "InvalidSignature", "trust": 1.0, "status": "OK"}
+2026-04-17 10:49:20,103 {"timestamp": "2026-04-17T05:19:20.103534+00:00", "session_id": "297c34fd-a44b-4c9f-8c7c-39659dac6c72", "decision": "Reject", "risk": "ReplayAttempt", "trust": 0.96275, "status": "OK"}

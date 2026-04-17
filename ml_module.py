@@ -15,6 +15,7 @@ THRESHOLD_PATH = os.getenv("THRESHOLD_PATH", "thresholds.json")
 _lgbm = None
 _iforest = None
 _scaler = None
+_if_scaler = None
 _THRESH = None
 
 def _load_thresholds():
@@ -47,6 +48,7 @@ def _load_model():
             _lgbm = artifact["lgbm"]
             _iforest = artifact["iforest"]
             _scaler = artifact.get("scaler", None)
+            _if_scaler = artifact.get("if_scaler", None)
             log.info("Hybrid ML models (LGBM + IForest) loaded successfully.")
         except Exception as e:
             log.error(f"CRITICAL: Failed to load models from {MODEL_PATH}: {e}")
@@ -102,18 +104,34 @@ def get_risk_score(context_dict: dict) -> str:
         # score_samples returns negative values (lower = more anomalous)
         if_score_raw = -_iforest.score_samples(features)[0]
 
-        # 4. Robust Normalization: Shift tanh [-1, 1] output safely into [0, 1]
-        if_score_norm = (np.tanh(if_score_raw) + 1) / 2
+        # 4. Normalization: Use the ruler from training (MinMaxScaler)
+        if _if_scaler is not None:
+            # Matches the exact linear scaling used in train_model.py
+            if_score_norm = _if_scaler.transform([[if_score_raw]])[0][0]
+        else:
+            # Fail-safe only
+            if_score_norm = (np.tanh(if_score_raw) + 1) / 2
 
-        # 5. Hybrid Fusion: Conservative Max-Fusion
-        final_score = max(lgbm_prob, if_score_norm)
+        # 5. Hybrid Fusion: Weighted Average (0.7 / 0.3)
+        risk_score = (0.7 * lgbm_prob) + (0.3 * if_score_norm)
+
+        # 6. Trust Inversion: Risk (High=Bad) -> Trust (High=Safe)
+        trust_score = 1.0 - risk_score
+
+        
+        # 5. Hybrid Fusion: Weighted Average 
+        risk_score = (0.7 * lgbm_prob) + (0.3 * if_score_norm)
+
+        # 6. Trust Inversion: Risk (High=Bad) -> Trust (High=Safe)
+        # This aligns the ML output with the policy engine's trust-based thresholds
+        trust_score = 1.0 - risk_score 
 
         log.debug(
             f"[ML_INFERENCE] LGBM={lgbm_prob:.4f}, IF={if_score_norm:.4f}, "
-            f"FINAL={final_score:.4f}, CTX={context_dict}"
+            f"RISK={risk_score:.4f}, TRUST={trust_score:.4f}"
         )
 
-        return _map_score_to_risk(final_score)
+        return _map_score_to_risk(trust_score)
 
     except Exception as e:
         log.error(f"ML Inference Error: {e}. Defaulting to 'Medium' risk fail-safe.")

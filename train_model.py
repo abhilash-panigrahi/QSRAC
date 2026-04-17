@@ -172,7 +172,7 @@ def main():
     hybrid_trust = 1.0 - risk_scores
 
     # SEMANTIC NAMING: Derived experimentally for FPR < 1%
-    risk_threshold = 0.65 
+    risk_threshold = 0.62 
     trust_threshold = 1.0 - risk_threshold
     
     # Attack occurs when Trust is BELOW the threshold
@@ -194,3 +194,4 @@ def main():
 if __name__ == "__main__":
     if len(sys.argv) > 1: CSV_FILES = sys.argv[1:]
     main()
+#to run use python3 train_model.py /mnt/e/Dataset/*.csv

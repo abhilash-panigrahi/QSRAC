@@ -1,0 +1,15 @@
+{
+    "Trust_Threshold": 0.38,
+    "Risk_Threshold": 0.62,
+    "ROC_AUC": 0.9922377883712287,
+    "F1_Score": 0.9363032698191103,
+    "Precision": 0.9685459972513263,
+    "Recall": 0.9061380907177718,
+    "False_Positive_Rate": 0.029294999999999856,
+    "Confusion_Matrix": {
+        "TN": 194141,
+        "FP": 5859,
+        "FN": 18688,
+        "TP": 180413
+    }
+}
