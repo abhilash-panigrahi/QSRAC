@@ -171,8 +171,7 @@ def main():
     risk_scores = (0.7 * lgbm_probs) + (0.3 * if_scores_norm)
     hybrid_trust = 1.0 - risk_scores
 
-    # SEMANTIC NAMING: Derived experimentally for FPR < 1%
-    risk_threshold = 0.62 
+    risk_threshold = 0.6275 
     trust_threshold = 1.0 - risk_threshold
     
     # Attack occurs when Trust is BELOW the threshold
@@ -180,12 +179,15 @@ def main():
 
     joblib.dump({"lgbm": lgbm, "iforest": iforest, "scaler": scaler, "if_scaler": if_scaler}, MODEL_PATH)
 
-    # Scientific Percentile Logic (Stored as Trust Floors: LOW > MEDIUM > HIGH)
+    benign_trust = hybrid_trust[y_test == 0]
+    low = float(np.percentile(benign_trust, 10))
+    medium = float((low + trust_threshold) / 2)
     risk_thresholds = {
-        "low": float(np.percentile(hybrid_trust, 70)),     # High Trust (e.g., 0.82)
-        "medium": float(np.percentile(hybrid_trust, 50)),  # Mid Trust (e.g., 0.55)
-        "high": float(trust_threshold)                     # Low Trust / Attack boundary (e.g., 0.35)
+        "low": low,
+        "medium": medium,
+        "high": float(trust_threshold),
     }
+
     with open(THRESHOLDS_PATH, "w") as f: json.dump(risk_thresholds, f, indent=4)
 
     generate_evaluation_outputs(y_test, hybrid_trust, risk_scores, hybrid_preds, trust_threshold)

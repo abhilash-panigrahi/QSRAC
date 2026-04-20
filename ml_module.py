@@ -41,7 +41,7 @@ def _load_thresholds():
             }
 
 def _load_model():
-    global _lgbm, _iforest, _scaler
+    global _lgbm, _iforest, _scaler, _if_scaler
     if _lgbm is None:
         try:
             artifact = joblib.load(MODEL_PATH)
@@ -55,11 +55,15 @@ def _load_model():
             raise
 
 def _extract_features(context_dict: dict) -> np.ndarray:
-    """Extracts 8-dimensional feature vector from request context."""
+    """Extracts 8-dimensional feature vector with exact training parity."""
+    # Apply the missing np.log1p transformations
+    raw_rate = max(float(context_dict.get("request_rate", 1.0)), 0.0)
+    raw_failed = max(float(context_dict.get("failed_attempts", 0.0)), 0.0)
+    
     features = [
         float(context_dict.get("hour_of_day", 12)),
-        float(context_dict.get("request_rate", 1.0)),
-        float(context_dict.get("failed_attempts", 0)),
+        float(np.clip(np.log1p(raw_rate), 0, 10)),     
+        float(np.clip(np.log1p(raw_failed), 0, 10)),   
         float(context_dict.get("geo_risk_score", 0.0)),
         float(context_dict.get("device_trust_score", 1.0)),
         float(context_dict.get("sensitivity_level", 1.0)),
@@ -90,8 +94,7 @@ def get_risk_score(context_dict: dict) -> str:
         _load_model()
         features = _extract_features(context_dict)
 
-        # 1. Safety Clipping: Prevents extreme outliers from skewing normalization
-        features = np.clip(features, -10, 10)
+        
 
         if _scaler is not None:
             features = _scaler.transform(features)
@@ -111,13 +114,6 @@ def get_risk_score(context_dict: dict) -> str:
         else:
             # Fail-safe only
             if_score_norm = (np.tanh(if_score_raw) + 1) / 2
-
-        # 5. Hybrid Fusion: Weighted Average (0.7 / 0.3)
-        risk_score = (0.7 * lgbm_prob) + (0.3 * if_score_norm)
-
-        # 6. Trust Inversion: Risk (High=Bad) -> Trust (High=Safe)
-        trust_score = 1.0 - risk_score
-
         
         # 5. Hybrid Fusion: Weighted Average 
         risk_score = (0.7 * lgbm_prob) + (0.3 * if_score_norm)

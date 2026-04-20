@@ -202,8 +202,8 @@ class QSRACMiddleware(BaseHTTPMiddleware):
 
             bounds = {
                 "hour_of_day": (0, 23),
-                "request_rate": (0, 20),
-                "failed_attempts": (0, 10),
+                "request_rate": (0, 10000),
+                "failed_attempts": (0, 500),
                 "geo_risk_score": (0, 1),
                 "device_trust_score": (0, 1),
                 "sensitivity_level": (1, 5),
@@ -259,6 +259,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
             risk_level = risk_map.get(risk_raw, "Medium")
             current_time = time.time()
             time_delta = current_time - float(session_data.get("last_req_at", current_time))
+            time_delta = max(0.0, min(time_delta, 2.0))
             trust_value = compute_trust(
                 float(session_data.get("trust", 1.0)), 
                 context["sensitivity_level"], 

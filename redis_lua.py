@@ -10,6 +10,7 @@ This module enforces the 'Fast Path' security invariants:
 import logging
 import redis
 import hashlib
+import time
 from config import REDIS_HOST, REDIS_PORT, REDIS_DB, SESSION_TTL
 
 log = logging.getLogger(__name__)
@@ -133,6 +134,7 @@ def create_session(session_id: str, core_token_hash: str, session_key: str, ttl:
             "seq": 0,
             "session_key": session_key,
             "trust": 1.0,
+            "last_req_at": time.time(),
         })
         pipe.expire(key, ttl)
         pipe.execute()
