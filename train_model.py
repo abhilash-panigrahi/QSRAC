@@ -42,21 +42,22 @@ def map_unsw_to_qsrac(df: pd.DataFrame) -> pd.DataFrame:
     mapped["hour_of_day"] = 12.0
 
     rate = pd.to_numeric(df.get("rate", 0), errors="coerce").fillna(0)
-    mapped["request_rate"] = rate
+    mapped["request_rate"] = np.log1p(rate.clip(lower=0)).clip(0, 10)
+
     dloss = pd.to_numeric(df.get("dloss", 0), errors="coerce").fillna(0)
     spkts = pd.to_numeric(df.get("spkts", 1), errors="coerce").fillna(1)
-    mapped["failed_attempts"] = dloss / (spkts + 1)
+    mapped["failed_attempts"] = np.log1p(dloss / (spkts + 1)).clip(0, 10)
 
     sttl = pd.to_numeric(df.get("sttl", 0), errors="coerce").fillna(0)
-    mapped["geo_risk_score"] = sttl / 255.0
+    mapped["geo_risk_score"] = (sttl > 64).astype(float) * 0.5
 
-    mapped["device_trust_score"] = 1.0 / (1.0 + mapped["failed_attempts"])
+    mapped["device_trust_score"] = (1.0 - np.tanh(mapped["failed_attempts"])).clip(0.1, 1.0)
 
     proto = df.get("proto", "").astype(str).str.lower()
     service = df.get("service", "").astype(str).str.lower()
     is_tcp = proto.isin(["tcp"]).astype(float)
     is_sensitive = service.isin(["ssh", "http", "https", "ftp"]).astype(float)
-    mapped["sensitivity_level"] = is_tcp * 2 + is_sensitive * 2 + 1.0
+    mapped["sensitivity_level"] = (is_tcp * 2 + is_sensitive * 2 + 1.0).clip(1, 5)
 
     mapped["is_vpn"] = 0.0
     mapped["is_tor"] = 0.0
@@ -107,11 +108,13 @@ def main():
     X_val_scaled = pd.DataFrame(scaler.transform(X_val), columns=FEATURE_COLUMNS)
 
     log.info("Training base LightGBM model...")
-    lgbm = LGBMClassifier(n_estimators=100, max_depth=5, learning_rate=0.05,random_state=RANDOM_STATE, verbose=-1)
+    lgbm = LGBMClassifier(n_estimators=100, max_depth=5, learning_rate=0.05, 
+                          class_weight="balanced", random_state=RANDOM_STATE, verbose=-1)
     lgbm.fit(X_train_scaled, y_train)
 
     log.info("Training Isolation Forest...")
-    iforest = IsolationForest(n_estimators=100, contamination=0.05,random_state=RANDOM_STATE, n_jobs=-1)
+    iforest = IsolationForest(n_estimators=100, contamination=0.05, 
+                              random_state=RANDOM_STATE, n_jobs=-1)
     iforest.fit(X_train_scaled[(y_train == 0).values])
 
     log.info("Computing raw hybrid scores on calibration set...")
@@ -124,7 +127,7 @@ def main():
     if_norm_calib = if_scaler.transform(if_raw_calib.reshape(-1, 1)).flatten()
     if_norm_calib = np.clip(if_norm_calib, 0, 1)
     
-    raw_risk_calib = (0.3 * lgbm_probs_calib) + (0.7 * if_norm_calib)
+    raw_risk_calib = (0.7 * lgbm_probs_calib) + (0.3 * if_norm_calib)
 
     risk_scaler = None
 
@@ -134,9 +137,25 @@ def main():
           raw_risk_calib.max())
 
     log.info("Fitting Platt Scaler (Logistic Regression) on hybrid risk...")
-    platt_scaler = LogisticRegression(max_iter=1000,C=0.5,random_state=RANDOM_STATE)
-    platt_scaler.fit(raw_risk_calib.reshape(-1, 1), y_calib)
+    pos = raw_risk_calib[y_calib == 1]
+    neg = raw_risk_calib[y_calib == 0]
 
+    n = min(len(pos), len(neg))
+
+    idx_pos = np.random.choice(len(pos), n, replace=False)
+    idx_neg = np.random.choice(len(neg), n, replace=False)
+
+    X_bal = np.concatenate([pos[idx_pos], neg[idx_neg]])
+    y_bal = np.concatenate([np.ones(n), np.zeros(n)])
+
+    platt_scaler = LogisticRegression(
+        class_weight="balanced",
+        max_iter=1000,
+        C=0.5,
+        random_state=RANDOM_STATE
+    )
+
+    platt_scaler.fit(X_bal.reshape(-1, 1), y_bal)
 
     log.info("Creating and validating final hybrid model artifact...")
     model = HybridRiskModel(lgbm, iforest, scaler, if_scaler, platt_scaler, risk_scaler)
@@ -168,29 +187,26 @@ def main():
 
     benign_trust = hybrid_trust_val[(y_val == 0).values]
     
-    med_t = best_trust_thresh
-    
-    low_candidates = benign_trust[benign_trust > med_t]
-    if len(low_candidates) > 0:
-        low_t = float(np.percentile(low_candidates, 50))
-    else:
-        low_t = med_t + 0.1
-        
-    high_candidates = benign_trust[benign_trust < med_t]
-    if len(high_candidates) > 0:
-        high_t = float(np.percentile(high_candidates, 10))
-    else:
-        high_t = max(0.01, med_t - 0.1)
+    # --- Improved threshold design (stable + real-world aligned) ---
 
-    if med_t >= low_t:
-        med_t = low_t - 0.01
+    med_t = best_trust_thresh  # keep F1-optimal boundary
+
+    # Use FULL benign distribution (no filtering)
+    low_t = float(np.percentile(benign_trust, 20))   # ~80% benign → Low
+    high_t = float(np.percentile(benign_trust, 5))   # bottom risky tail
+
+    # Ensure strict ordering: LOW > MEDIUM > HIGH
+    if low_t <= med_t+ 0.05:
+        low_t = med_t + 0.05
+
     if high_t >= med_t:
-        high_t = med_t - 0.01
+        high_t = med_t - 0.02
 
+    # Clamp to valid range
     risk_thresholds = {
-        "low": float(max(low_t, 0.02)),
-        "medium": float(max(med_t, 0.01)),
-        "high": float(max(high_t, 0.00))
+        "low": float(min(low_t, 0.99)),
+        "medium": float(med_t),
+        "high": float(max(high_t, 0.01))
     }
 
     with open(THRESHOLDS_PATH, "w") as f: 
@@ -201,3 +217,4 @@ def main():
 if __name__ == "__main__":
     if len(sys.argv) > 1: CSV_FILES = sys.argv[1:]
     main()
+

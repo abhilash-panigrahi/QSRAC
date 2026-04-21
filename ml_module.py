@@ -48,11 +48,11 @@ class HybridRiskModel:
         if_norm = self.if_scaler.transform(if_raw.reshape(-1, 1)).flatten() if self.if_scaler else if_raw
         if_norm = np.clip(if_norm, 0, 1)
         
-        raw_risk = (0.3 * lgbm_prob) + (0.7 * if_norm)
+        raw_risk = (0.7 * lgbm_prob) + (0.3 * if_norm)
         
         
         if np.mean(raw_risk) > 0.9:
-            pass
+            logging.getLogger("qsrac.ml").warning("Risk saturation detected in inference")
         
         calibrated_risk = self.platt_scaler.predict_proba(raw_risk.reshape(-1, 1))[:, 1]
         return calibrated_risk
@@ -139,3 +139,5 @@ def get_risk_score(context_dict: dict) -> str:
     except Exception as e:
         log.error(f"ML Inference Error: {e}. Defaulting to 'Medium' risk fail-safe.")
         return "Medium"
+
+
