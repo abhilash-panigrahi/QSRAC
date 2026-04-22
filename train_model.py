@@ -192,7 +192,7 @@ def main():
     med_t = best_trust_thresh  # keep F1-optimal boundary
 
     # Use FULL benign distribution (no filtering)
-    low_t = float(np.percentile(benign_trust, 20))   # ~80% benign → Low
+    low_t = float(np.percentile(benign_trust, 15))   # ~80% benign → Low
     high_t = float(np.percentile(benign_trust, 5))   # bottom risky tail
 
     # Ensure strict ordering: LOW > MEDIUM > HIGH
@@ -200,13 +200,13 @@ def main():
         low_t = med_t + 0.05
 
     if high_t >= med_t:
-        high_t = med_t - 0.02
+        high_t = med_t - 0.35
 
     # Clamp to valid range
     risk_thresholds = {
-        "low": float(min(low_t, 0.99)),
+        "low": float(min(low_t, 0.95)),
         "medium": float(med_t),
-        "high": float(max(high_t, 0.01))
+        "high": float(max(high_t, 0.35))
     }
 
     with open(THRESHOLDS_PATH, "w") as f: 
