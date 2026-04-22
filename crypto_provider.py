@@ -27,20 +27,31 @@ class CryptoProvider:
 
 
 # ─────────────────────────────────────────────
-# MOCK IMPLEMENTATION (FAST / DEV SAFE)
+# MOCK IMPLEMENTATION (ONLY FOR BENCHMARKS LIKE END-TO-END REQUEST LATENCY, RPS etc....)
 # ─────────────────────────────────────────────
 
 class MockCryptoProvider(CryptoProvider):
+    def __init__(self):
+        self.signing_private_key = None
+        self.signing_public_key = None
 
     def generate_signing_keypair(self):
         key = os.urandom(32)
+        self.signing_private_key = key
+        self.signing_public_key = key  # symmetric for HMAC
         return key, key
 
     def sign(self, private_key, data: bytes) -> bytes:
-        return hmac.new(private_key, data, hashlib.sha256).digest()
+        tmp = data
+        for _ in range(2000):
+            tmp = hashlib.sha256(tmp).digest()
+        return hmac.new(private_key, tmp, hashlib.sha256).digest()
 
     def verify(self, signature: bytes, data: bytes, public_key) -> bool:
-        expected = hmac.new(public_key, data, hashlib.sha256).digest()
+        tmp = data
+        for _ in range(2000):
+            tmp = hashlib.sha256(tmp).digest()
+        expected = hmac.new(public_key, tmp, hashlib.sha256).digest()
         return hmac.compare_digest(signature, expected)
 
     def generate_exchange_keypair(self):
@@ -49,12 +60,19 @@ class MockCryptoProvider(CryptoProvider):
         return sk, pk
 
     def kem_encapsulate(self, peer_public_key: bytes):
-        shared = hashlib.sha256(peer_public_key).digest()
-        return shared, shared  # (ciphertext, shared_secret)
+        ephemeral = os.urandom(32)
+
+        tmp = peer_public_key
+        for _ in range(1000):
+            tmp = hashlib.sha256(tmp).digest()
+
+        shared = hashlib.sha256(peer_public_key + ephemeral).digest()
+        return ephemeral, shared
 
     def kem_decapsulate(self, private_key: bytes, ciphertext: bytes):
-        return ciphertext
-
+        peer_public_key = hashlib.sha256(private_key).digest()
+        shared = hashlib.sha256(peer_public_key + ciphertext).digest()
+        return shared
 
 # ─────────────────────────────────────────────
 # PQC IMPLEMENTATION (liboqs)

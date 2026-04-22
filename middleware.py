@@ -71,30 +71,15 @@ class QSRACMiddleware(BaseHTTPMiddleware):
                         trust_value,
                         next_seq
                     )
-
-                    result = validate_and_update(
-                        session_id,
-                        next_seq,
-                        envelope_hash,
-                        session_data["last_hash_1"],
-                        current_time,
-                        trust_value
-                    )
-
-                    if result != "OK":
-                        await log_event_async(session_id, "Reject", result, trust_value)    
-                        return JSONResponse(
-                            status_code=403,
-                            content={"error": f"State update failed: {result}"}
-                        )
+                  
 
                     await log_event_async(session_id, "Reject", "MissingHeaders", trust_value)
                     return self._finalize_response(
                         JSONResponse(status_code=401, content={"error": "Missing required authentication headers"}),
                         "Medium",
                         trust_value,
-                        next_seq,
-                        envelope_hash
+                        None,
+                        None
                     )
 
                 except ValueError as e:
@@ -139,14 +124,7 @@ class QSRACMiddleware(BaseHTTPMiddleware):
                     next_seq
                 )
 
-                validate_and_update(
-                    session_id,
-                    next_seq,
-                    envelope_hash,
-                    session_data["last_hash_1"],
-                    current_time,
-                    trust_value
-                )
+
 
                 await log_event_async(session_id, "Reject", "InvalidTokenJSON", trust_value)
                 return JSONResponse(status_code=400, content={"error": "Invalid Core Token JSON"})
@@ -175,14 +153,6 @@ class QSRACMiddleware(BaseHTTPMiddleware):
                     next_seq
                 )
 
-                validate_and_update(
-                    session_id,
-                    next_seq,
-                    envelope_hash,
-                    session_data["last_hash_1"],
-                    current_time,
-                    trust_value
-                )
 
                 await log_event_async(session_id, "Reject", "InvalidSignature", trust_value)
                 return JSONResponse(status_code=401, content={"error": "Core token signature invalid"})
@@ -268,40 +238,12 @@ class QSRACMiddleware(BaseHTTPMiddleware):
             )
             
             request.state.risk, request.state.trust = risk_level, trust_value
+            abac_ok = validate_attributes(context)
 
-            if not validate_attributes(context):
+            if not abac_ok:
                 await log_event_async(session_id, "Reject", "AttributeDenied", trust_value)
 
-                next_seq = int(session_data["seq"]) + 1
-                envelope_hash, _ = generate_envelope(
-                    bytes.fromhex(session_data["session_key"]),
-                    session_data["core_token_hash"],
-                    risk_level,
-                    context,
-                    session_data["last_hash_1"],
-                    trust_value,
-                    next_seq
-                )
 
-                result=validate_and_update(
-                    session_id,
-                    next_seq,
-                    envelope_hash,
-                    session_data["last_hash_1"],
-                    current_time,
-                    trust_value
-                )
-                if result != "OK":
-                    await log_event_async(session_id, "Reject", result, trust_value)
-                    return JSONResponse(status_code=403, content={"error": f"State update failed: {result}"})
-
-                return self._finalize_response(
-                    JSONResponse(status_code=403, content={"error": "Access denied: Attribute validation failed"}),
-                    risk_level,
-                    trust_value,
-                    next_seq,
-                    envelope_hash
-                )
 
             # 4. Fast Path State Evolution
             client_seq = int(request.headers.get("X-QSRAC-Seq", -1))
@@ -321,24 +263,12 @@ class QSRACMiddleware(BaseHTTPMiddleware):
                     next_seq
                 )
 
-                result= validate_and_update(
-                    session_id,
-                    next_seq,
-                    envelope_hash,
-                    session_data["last_hash_1"],
-                    current_time,
-                    trust_value
-                )
-                if result != "OK":
-                    await log_event_async(session_id, "Reject", result, trust_value)
-                    return JSONResponse(status_code=403, content={"error": f"State update failed: {result}"})
-
                 return self._finalize_response(
                     JSONResponse(status_code=400, content={"error": "Missing QSRAC state headers"}),
                     risk_level,
                     trust_value,
-                    next_seq,
-                    envelope_hash
+                    None,
+                    None
                 )
 
             # Granular Verification
@@ -356,24 +286,12 @@ class QSRACMiddleware(BaseHTTPMiddleware):
                     next_seq
                 )
 
-                result= validate_and_update(
-                    session_id,
-                    next_seq,
-                    envelope_hash,
-                    session_data["last_hash_1"],
-                    current_time,
-                    trust_value
-                )
-                if result != "OK":
-                    await log_event_async(session_id, "Reject", result, trust_value)
-                    return JSONResponse(status_code=403, content={"error": f"State update failed: {result}"})
-
                 return self._finalize_response(
                     JSONResponse(status_code=403, content={"error": "Sequence mismatch: Replay detected"}),
                     risk_level,
                     trust_value,
-                    next_seq,
-                    envelope_hash
+                    None,
+                    None
                 )
 
             if client_env != session_data["last_hash_1"]:
@@ -390,24 +308,12 @@ class QSRACMiddleware(BaseHTTPMiddleware):
                     next_seq
                 )
 
-                result= validate_and_update(
-                    session_id,
-                    next_seq,
-                    envelope_hash,
-                    session_data["last_hash_1"],
-                    current_time,
-                    trust_value
-                )
-                if result != "OK":
-                    await log_event_async(session_id, "Reject", result, trust_value)
-                    return JSONResponse(status_code=403, content={"error": f"State update failed: {result}"})
-
                 return self._finalize_response(
                     JSONResponse(status_code=403, content={"error": "Hash mismatch: State integrity failed"}),
                     risk_level,
                     trust_value,
-                    next_seq,
-                    envelope_hash
+                    None,
+                    None
                 )
 
             next_seq = client_seq + 1
@@ -426,6 +332,16 @@ class QSRACMiddleware(BaseHTTPMiddleware):
             # 5. Policy Execution
             decision = evaluate_policy(risk_level, trust_value)
 
+            if not abac_ok:
+                downgrade = {
+                    "Allow": "Restrict",
+                    "Restrict": "Step-Up",
+                    "Step-Up": "Deny",
+                    "Deny": "Deny",
+                    "Block": "Block"
+                }
+                decision = downgrade.get(decision, "Deny")
+            
             if decision in {"Deny", "Block"}:
                 response = JSONResponse(status_code=403, content={"error": f"Access {decision.lower()}ed"})
             elif decision == "Step-Up":

@@ -29,7 +29,6 @@ def _optional(name: str, default: str) -> str:
 # Process will not start if any are absent
 
 SECRET_KEY: str = _require("SECRET_KEY")
-DB_PASSWORD: str = _require("DB_PASSWORD")
 SIGNING_PRIVATE_KEY: str = _require("SIGNING_PRIVATE_KEY")
 SIGNING_PUBLIC_KEY: str = _require("SIGNING_PUBLIC_KEY")
 EXCHANGE_PRIVATE_KEY: str = _require("EXCHANGE_PRIVATE_KEY")
@@ -41,11 +40,6 @@ EXCHANGE_PUBLIC_KEY: str = _require("EXCHANGE_PUBLIC_KEY")
 REDIS_HOST: str = _optional("REDIS_HOST", "localhost")
 REDIS_PORT: int = int(_optional("REDIS_PORT", "6379"))
 REDIS_DB:   int = int(_optional("REDIS_DB",   "0"))
-
-DB_USER: str = _optional("DB_USER", "postgres")
-DB_HOST: str = _optional("DB_HOST", "localhost")
-DB_PORT: str = _optional("DB_PORT", "5432")
-DB_NAME: str = _optional("DB_NAME", "qsrac")
 
 APP_HOST: str = _optional("APP_HOST", "0.0.0.0")
 APP_PORT: int = int(_optional("APP_PORT", "8000"))

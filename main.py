@@ -12,6 +12,7 @@ from attribute_validator import validate_attributes
 from policy_engine import evaluate_policy
 from pydantic import BaseModel
 from datetime import datetime, timezone
+from ml_module import init_model
 
 # config must be imported first — raises RuntimeError at startup if any
 # required env var is missing, before any other module initialises.
@@ -43,18 +44,19 @@ MFA_NONCE_TTL = 120
 MFA_TRUST_INCREMENT = 0.2
 
 app = FastAPI(title="QSRAC", version="1.0.0")
+init_model()
 # ── Middleware registration ────────────────────────────────────────────────────
 
 from middleware import QSRACMiddleware, set_signing_public_key
 app.add_middleware(QSRACMiddleware)
 
 from crypto_provider import get_signing_public_key
+_server_signing_private_key, _ = generate_signing_keypair()
 _server_signing_public_key = get_signing_public_key()
+
 _, _server_exchange_public_key = generate_exchange_keypair()
 
 set_signing_public_key(_server_signing_public_key)
-
-_server_signing_private_key, _ = generate_signing_keypair()
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
 
@@ -181,7 +183,8 @@ def login(request: LoginRequest):
         client_pub_bytes = bytes.fromhex(request.client_public_key)
         kem_ct, shared_key = kem_encapsulate(client_pub_bytes)
         kem_ciphertext_hex = kem_ct.hex()
-        session_key_hex = shared_key.hex()
+        session_key = hashlib.sha256(shared_key).digest()
+        session_key_hex = session_key.hex()
         init_hash = hashlib.sha256(b"init").hexdigest()
 
         # Serialize whatever key type the provider generated (Kyber or ECDH)

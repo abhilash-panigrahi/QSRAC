@@ -13,8 +13,10 @@ handler = RotatingFileHandler(LOG_FILE, maxBytes=5*1024*1024, backupCount=5)
 handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
 
 audit_logger = logging.getLogger("audit")
-audit_logger.addHandler(handler)
+if not audit_logger.handlers:
+    audit_logger.addHandler(handler)
 audit_logger.setLevel(logging.INFO)
+audit_logger.propagate = False
 
 def log_event(session_id: str, decision: str, risk: str, trust: float, status: str = "OK"):
     """

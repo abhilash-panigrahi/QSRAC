@@ -16,7 +16,8 @@ from sklearn.metrics import f1_score
 from ml_module import HybridRiskModel
 
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
-CSV_FILES = ["UNSW_NB15_training-set.csv", "UNSW_NB15_testing-set.csv"]
+CSV_FILES = ["UNSW_NB15_training-set.csv"]
+
 MODEL_PATH = "model.joblib"
 THRESHOLDS_PATH = "thresholds.json"
 RANDOM_STATE = 42
@@ -39,7 +40,7 @@ log = logging.getLogger("qsrac.trainer")
 def map_unsw_to_qsrac(df: pd.DataFrame) -> pd.DataFrame:
     mapped = pd.DataFrame(index=df.index)
 
-    mapped["hour_of_day"] = 12.0
+    mapped["hour_of_day"] = 0.0
 
     rate = pd.to_numeric(df.get("rate", 0), errors="coerce").fillna(0)
     mapped["request_rate"] = np.log1p(rate.clip(lower=0)).clip(0, 10)
@@ -90,6 +91,27 @@ def load_data(file_paths):
 def main():
     X, y = load_data(CSV_FILES)
     log.info(f"Dataset loaded. Shape: {X.shape}, Attacks: {y.sum()}")
+
+    from sklearn.utils import resample
+
+    # Separate classes
+    X_df = pd.concat([X, y], axis=1)
+    majority = X_df[X_df["label"] == 0]   # normal
+    minority = X_df[X_df["label"] == 1]   # attack
+
+    # Downsample attacks (recommended)
+    minority_down = resample(
+        minority,
+        replace=False,
+        n_samples=min(len(majority), len(minority)),
+        random_state=42
+    )
+
+    balanced_df = pd.concat([majority, minority_down])
+    balanced_df = balanced_df.sample(frac=1, random_state=42).reset_index(drop=True)
+
+    X = balanced_df[FEATURE_COLUMNS]
+    y = balanced_df["label"]
 
     X_train_full, X_val, y_train_full, y_val = train_test_split(X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y)
     X_train, X_calib, y_train, y_calib = train_test_split(X_train_full, y_train_full, test_size=0.25, random_state=RANDOM_STATE, stratify=y_train_full)
@@ -161,52 +183,52 @@ def main():
     model = HybridRiskModel(lgbm, iforest, scaler, if_scaler, platt_scaler, risk_scaler)
     
     calibrated_risk_val = model.predict_risk(X_val)
+    print("Distribution check:")
+    print("Low:", np.mean(calibrated_risk_val < 0.1307))
+    print("Medium:", np.mean((calibrated_risk_val >= 0.1307) & (calibrated_risk_val < 0.3919)))
+    print("High:", np.mean((calibrated_risk_val >= 0.3919) & (calibrated_risk_val < 0.6)))
+    print("Critical:", np.mean(calibrated_risk_val >= 0.6))
 
     print("Calibrated risk stats:",
           calibrated_risk_val.min(),
           calibrated_risk_val.mean(),
           calibrated_risk_val.max())
 
-    hybrid_trust_val = 1.0 - calibrated_risk_val
-
     best_f1 = 0
-    best_trust_thresh = 0.5
-    trust_candidates = np.linspace(0.1, 0.9, 100)
-    
-    for t in trust_candidates:
-        preds = (hybrid_trust_val <= t).astype(int)
+    best_risk_thresh = 0.5
+    risk_candidates = np.linspace(0.1, 0.95, 100)
+
+    for t in risk_candidates:
+        preds = (calibrated_risk_val >= t).astype(int)
         f1 = f1_score(y_val, preds)
         if f1 > best_f1:
             best_f1 = f1
-            best_trust_thresh = t
+            best_risk_thresh = t
 
-    log.info(f"Optimal Trust Threshold: {best_trust_thresh:.4f} (F1: {best_f1:.4f})")
+    log.info(f"Optimal Risk Threshold: {best_risk_thresh:.4f} (F1: {best_f1:.4f})")
 
     log.info("Saving unified model artifact...")
     joblib.dump(model, MODEL_PATH)
 
-    benign_trust = hybrid_trust_val[(y_val == 0).values]
+    benign_risk = calibrated_risk_val[(y_val == 0).values]
     
-    # --- Improved threshold design (stable + real-world aligned) ---
+    med_t = float(best_risk_thresh)  # keep F1-optimal boundary
 
-    med_t = best_trust_thresh  # keep F1-optimal boundary
+    # Use FULL benign distribution (no filtering)   
+    low_t = float(np.percentile(benign_risk, 98))   # critical boundary
+    high_t = float(np.percentile(benign_risk, 65))  # medium boundary
 
-    # Use FULL benign distribution (no filtering)
-    low_t = float(np.percentile(benign_trust, 15))   # ~80% benign → Low
-    high_t = float(np.percentile(benign_trust, 5))   # bottom risky tail
+    # Ensure ordering
+    if low_t - med_t < 0.07:
+        low_t = med_t + 0.07
 
-    # Ensure strict ordering: LOW > MEDIUM > HIGH
-    if low_t <= med_t+ 0.05:
-        low_t = med_t + 0.05
+    if med_t - high_t < 0.10:
+        high_t = med_t - 0.10
 
-    if high_t >= med_t:
-        high_t = med_t - 0.35
-
-    # Clamp to valid range
     risk_thresholds = {
-        "low": float(min(low_t, 0.95)),
+        "low": float(min(low_t, 0.5)),
         "medium": float(med_t),
-        "high": float(max(high_t, 0.35))
+        "high": float(max(high_t, 0.12))
     }
 
     with open(THRESHOLDS_PATH, "w") as f: 

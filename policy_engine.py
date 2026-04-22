@@ -1,7 +1,7 @@
 def _map_trust_confidence(trust_value: float) -> str:
-    if trust_value >= 0.7:
+    if trust_value >= 0.8:
         return "High"
-    elif trust_value >= 0.3:
+    elif trust_value >= 0.4:
         return "Low"
     else:
         return "Zero"
@@ -15,7 +15,7 @@ DECISION_TABLE = {
     ("Medium",   "Low"):  "Step-Up",
     ("Medium",   "Zero"): "Deny",
     ("High",     "High"): "Step-Up",
-    ("High",     "Low"):  "Deny",
+    ("High",     "Low"):  "Step-up",
     ("High",     "Zero"): "Block",
     ("Critical", "High"): "Deny",
     ("Critical", "Low"):  "Block",

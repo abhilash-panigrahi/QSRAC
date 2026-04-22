@@ -132,7 +132,7 @@ if __name__ == "__main__":
                             headers={"X-Session-ID": client.session_id}).json()
     
     # Solve challenge using established Session Key
-    msg = (res_mfa["nonce"] + str(res_mfa["timestamp"])).encode()
+    msg = (res_mfa["nonce"] + f"{res_mfa['timestamp']:.6f}").encode("utf-8")
     response_hmac = hmac.new(client.session_key, msg, hashlib.sha256).hexdigest()
 
     print("[5/6] Verifying MFA & Recovering State...")

@@ -11,6 +11,7 @@ log = logging.getLogger("qsrac.ml")
 
 MODEL_PATH = os.getenv("MODEL_PATH", "model.joblib")
 THRESHOLD_PATH = os.getenv("THRESHOLD_PATH", "thresholds.json")
+FORCE_RISK = os.getenv("FORCE_RISK")
 
 FEATURE_COLUMNS = [
     "hour_of_day",
@@ -62,12 +63,20 @@ class HybridRiskModel:
         calibrated_risk = self.platt_scaler.predict_proba(raw_risk.reshape(-1, 1))[:, 1]
         return calibrated_risk
 
-try:
-    _model = joblib.load(MODEL_PATH)
-    if not hasattr(_model, "predict_risk"):
-        raise RuntimeError("Invalid model: missing predict_risk")
-except Exception as e:
-    raise RuntimeError(f"CRITICAL: Model load failed: {e}")
+_model = None
+
+def init_model():
+    global _model
+    if _model is not None:
+        return
+
+    try:
+        _model = joblib.load(MODEL_PATH)
+        if not hasattr(_model, "predict_risk"):
+            raise RuntimeError("Invalid model: missing predict_risk")
+        log.info("ML model loaded successfully")
+    except Exception as e:
+        raise RuntimeError(f"CRITICAL: Model load failed: {e}")
 
 _THRESH = None
 
@@ -128,11 +137,17 @@ def _map_risk_score(risk_score: float) -> str:
         return "Low"
 
 def get_risk_score(context_dict: dict) -> str:
-    _load_model()
+    global _model
     features_df = _extract_features(context_dict)
 
+    if _model is None:
+        init_model()
+
+    if FORCE_RISK:
+        return FORCE_RISK
     risk_score = float(_model.predict_risk(features_df)[0])
     log.debug(f"[ML_INFERENCE] RISK={risk_score:.4f}")
+    
     return _map_risk_score(risk_score)
 
 

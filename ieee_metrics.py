@@ -137,11 +137,10 @@ def main():
     if_norm_val = np.clip(if_scaler.transform(if_raw_val.reshape(-1, 1)).flatten(), 0, 1)
 
     risk_val = platt.predict_proba((0.7 * lgbm_val + 0.3 * if_norm_val).reshape(-1, 1))[:, 1]
-    trust_val = 1 - risk_val
 
     best_t, best_f1 = 0.5, 0
     for t in np.linspace(0.1, 0.9, 100):
-        pred = (trust_val <= t).astype(int)
+        pred = (risk_val >= t).astype(int)
         f1 = f1_score(y_val, pred)
         if f1 > best_f1:
             best_f1, best_t = f1, t

@@ -48,7 +48,7 @@ def generate_envelope(
     )
     
     raw_envelope_bytes = envelope_payload.encode("utf-8")
-
+    session_key = hashlib.sha256(session_key).digest()
     # HMAC-SHA256 ensures the state cannot be tampered with in transit
     envelope_hash = hmac.new(
         session_key,
