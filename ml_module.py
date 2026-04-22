@@ -36,10 +36,15 @@ class HybridRiskModel:
         if not isinstance(X, pd.DataFrame):
             raise TypeError("Input must be a pandas DataFrame with correct feature names.")
         
-        if list(X.columns) != FEATURE_COLUMNS:
-            raise ValueError("Input feature columns do not match expected training columns.")
+        if set(X.columns) != set(FEATURE_COLUMNS):
+            raise ValueError("Feature mismatch")
+        X = X[FEATURE_COLUMNS]
 
-        X_scaled_array = self.scaler.transform(X) if self.scaler else X.values
+        if self.scaler:
+            X_scaled_array = self.scaler.transform(X)
+        else:
+            log.warning("Scaler missing — using raw features")
+            X_scaled_array = X.values
         X_scaled_df = pd.DataFrame(X_scaled_array, columns=FEATURE_COLUMNS)
 
         lgbm_prob = self.lgbm.predict_proba(X_scaled_df)[:, 1]
@@ -57,7 +62,13 @@ class HybridRiskModel:
         calibrated_risk = self.platt_scaler.predict_proba(raw_risk.reshape(-1, 1))[:, 1]
         return calibrated_risk
 
-_model = None
+try:
+    _model = joblib.load(MODEL_PATH)
+    if not hasattr(_model, "predict_risk"):
+        raise RuntimeError("Invalid model: missing predict_risk")
+except Exception as e:
+    raise RuntimeError(f"CRITICAL: Model load failed: {e}")
+
 _THRESH = None
 
 def _load_thresholds():
@@ -80,14 +91,6 @@ def _load_thresholds():
                 "high": config.RISK_THRESHOLD_HIGH,
             }
 
-def _load_model():
-    global _model
-    if _model is None:
-        try:
-            _model = joblib.load(MODEL_PATH)
-        except Exception as e:
-            log.error(f"CRITICAL: Failed to load models from {MODEL_PATH}: {e}")
-            raise
 
 def _extract_features(context_dict: dict) -> pd.DataFrame:
     if not context_dict:
@@ -112,32 +115,25 @@ def _extract_features(context_dict: dict) -> pd.DataFrame:
     df = pd.DataFrame([features])
     return df[FEATURE_COLUMNS]
 
-def _map_score_to_risk(trust_score: float) -> str:
+def _map_risk_score(risk_score: float) -> str:
     _load_thresholds()
     
-    if trust_score >= _THRESH["low"]:
-        return "Low"
-    elif trust_score >= _THRESH["medium"]:
-        return "Medium"
-    elif trust_score >= _THRESH["high"]:
-        return "High"
-    else:
+    if risk_score >= _THRESH["low"]:
         return "Critical"
+    elif risk_score >= _THRESH["medium"]:
+        return "High"
+    elif risk_score >= _THRESH["high"]:
+        return "Medium"
+    else:
+        return "Low"
 
 def get_risk_score(context_dict: dict) -> str:
-    try:
-        _load_model()
-        features_df = _extract_features(context_dict)
+    _load_model()
+    features_df = _extract_features(context_dict)
 
-        risk_score = float(_model.predict_risk(features_df)[0])
-        trust_score = 1.0 - risk_score 
+    risk_score = float(_model.predict_risk(features_df)[0])
+    log.debug(f"[ML_INFERENCE] RISK={risk_score:.4f}")
+    return _map_risk_score(risk_score)
 
-        log.debug(f"[ML_INFERENCE] RISK={risk_score:.4f}, TRUST={trust_score:.4f}")
-
-        return _map_score_to_risk(trust_score)
-
-    except Exception as e:
-        log.error(f"ML Inference Error: {e}. Defaulting to 'Medium' risk fail-safe.")
-        return "Medium"
 
 
