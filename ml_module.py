@@ -3,14 +3,13 @@ import os
 import numpy as np
 import pandas as pd
 import joblib
-import json
 import logging
 import config
+import numpy as np
 
 log = logging.getLogger("qsrac.ml")
 
 MODEL_PATH = os.getenv("MODEL_PATH", "model.joblib")
-THRESHOLD_PATH = os.getenv("THRESHOLD_PATH", "thresholds.json")
 FORCE_RISK = os.getenv("FORCE_RISK")
 
 FEATURE_COLUMNS = [
@@ -61,6 +60,17 @@ class HybridRiskModel:
             logging.getLogger("qsrac.ml").warning("Risk saturation detected in inference")
         
         calibrated_risk = self.platt_scaler.predict_proba(raw_risk.reshape(-1, 1))[:, 1]
+
+        # 🔧 desaturate using logit transform
+        eps = 1e-6
+        p = np.clip(calibrated_risk, eps, 1 - eps)
+        logit = np.log(p / (1 - p))
+
+        # compress extremes
+        logit = logit / 1.5
+
+        calibrated_risk = 1 / (1 + np.exp(-logit))
+
         return calibrated_risk
 
 _model = None
@@ -77,29 +87,6 @@ def init_model():
         log.info("ML model loaded successfully")
     except Exception as e:
         raise RuntimeError(f"CRITICAL: Model load failed: {e}")
-
-_THRESH = None
-
-def _load_thresholds():
-    global _THRESH
-    if _THRESH is None:
-        if config.USE_DYNAMIC_THRESHOLDS:
-            try:
-                with open(THRESHOLD_PATH) as f:
-                    _THRESH = json.load(f)
-            except Exception:
-                _THRESH = {
-                    "low": config.RISK_THRESHOLD_LOW,
-                    "medium": config.RISK_THRESHOLD_MEDIUM,
-                    "high": config.RISK_THRESHOLD_HIGH,
-                }
-        else:
-            _THRESH = {
-                "low": config.RISK_THRESHOLD_LOW,
-                "medium": config.RISK_THRESHOLD_MEDIUM,
-                "high": config.RISK_THRESHOLD_HIGH,
-            }
-
 
 def _extract_features(context_dict: dict) -> pd.DataFrame:
     if not context_dict:
@@ -124,31 +111,39 @@ def _extract_features(context_dict: dict) -> pd.DataFrame:
     df = pd.DataFrame([features])
     return df[FEATURE_COLUMNS]
 
-def _map_risk_score(risk_score: float) -> str:
-    _load_thresholds()
-    
-    if risk_score >= _THRESH["low"]:
-        return "Critical"
-    elif risk_score >= _THRESH["medium"]:
-        return "High"
-    elif risk_score >= _THRESH["high"]:
-        return "Medium"
-    else:
+_THRESH = {
+    "low_medium": 0.32,
+    "medium_high": 0.6,
+    "high_critical": 0.94
+}
+
+def _map_risk(score: float) -> str:
+    s = float(np.clip(score, 0.0, 1.0))
+
+    if s < _THRESH["low_medium"]:
         return "Low"
+    elif s < _THRESH["medium_high"]:
+        return "Medium"
+    elif s < _THRESH["high_critical"]:
+        return "High"
+    else:
+        return "Critical"
 
 def get_risk_score(context_dict: dict) -> str:
     global _model
+
     features_df = _extract_features(context_dict)
 
     if _model is None:
         init_model()
 
-    if FORCE_RISK:
-        return FORCE_RISK
     risk_score = float(_model.predict_risk(features_df)[0])
-    log.debug(f"[ML_INFERENCE] RISK={risk_score:.4f}")
-    
-    return _map_risk_score(risk_score)
+
+    label = _map_risk(risk_score)
+
+    print("RAW RISK SCORE =", risk_score)
+    return label
+
 
 
 
