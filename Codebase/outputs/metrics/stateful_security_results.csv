@@ -1,0 +1,4 @@
+Attack_Type,Exception,Gate_Response
+Replay Attack,REPLAY_DETECTED,Blocked
+State Tampering,CHAIN_BROKEN,Blocked
+Valid Sequence,None,Passed
