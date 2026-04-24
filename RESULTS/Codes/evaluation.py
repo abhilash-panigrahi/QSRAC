@@ -4,11 +4,26 @@ import matplotlib.pyplot as plt
 from decay_engine import compute_trust
 from policy_engine import evaluate_policy
 
-def plot_policy_distribution(df_results):
-    np.random.seed(42)
-    
+def plot_policy_distribution(df_results):   
     risk_levels = df_results['band'].tolist()
-    trust_values = np.random.uniform(0.0, 1.0, len(risk_levels))
+    trust = 1.0
+    trust_values = []
+
+    risk_map = {
+        "low": 0.0,
+        "medium": 0.3,
+        "high": 0.6,
+        "critical": 1.0
+    }
+
+    for r in risk_levels:
+        trust = compute_trust(
+            trust0=trust,
+            sensitivity=3,
+            risk_trend=risk_map.get(r.lower(), 0.5),
+            time_delta=1.0
+        )
+        trust_values.append(trust)
     
     decisions = [evaluate_policy(r, t) for r, t in zip(risk_levels, trust_values)]
     counts = pd.Series(decisions).value_counts()

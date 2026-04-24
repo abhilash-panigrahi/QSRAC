@@ -1,4 +1,3 @@
-# ml_module.py
 import os
 import numpy as np
 import pandas as pd
@@ -6,11 +5,37 @@ import joblib
 import logging
 import config
 import numpy as np
+import json
 
 log = logging.getLogger("qsrac.ml")
 
 MODEL_PATH = os.getenv("MODEL_PATH", "model.joblib")
+THRESHOLD_PATH = os.getenv("THRESHOLD_PATH", "thresholds.json")
 FORCE_RISK = os.getenv("FORCE_RISK")
+
+
+_THRESH = None
+def _load_thresholds():
+    global _THRESH
+    if _THRESH is None:
+        if config.USE_DYNAMIC_THRESHOLDS:
+            try:
+                with open(THRESHOLD_PATH) as f:
+                    _THRESH = json.load(f)
+            except Exception:
+                # Fallback if dynamic is True but file is missing
+                _THRESH = {
+                    "low": config.RISK_THRESHOLD_LOW,
+                    "medium": config.RISK_THRESHOLD_MEDIUM,
+                    "high": config.RISK_THRESHOLD_HIGH,
+                }
+        else:
+            
+            _THRESH = {
+                "low": config.RISK_THRESHOLD_LOW,
+                "medium": config.RISK_THRESHOLD_MEDIUM,
+                "high": config.RISK_THRESHOLD_HIGH,
+            }
 
 FEATURE_COLUMNS = [
     "hour_of_day",
@@ -56,8 +81,7 @@ class HybridRiskModel:
         raw_risk = (0.7 * lgbm_prob) + (0.3 * if_norm)
         
         
-        if np.mean(raw_risk) > 0.9:
-            logging.getLogger("qsrac.ml").warning("Risk saturation detected in inference")
+
         
         calibrated_risk = self.platt_scaler.predict_proba(raw_risk.reshape(-1, 1))[:, 1]
 
@@ -74,6 +98,7 @@ class HybridRiskModel:
         return calibrated_risk
 
 _model = None
+
 
 def init_model():
     global _model
@@ -111,20 +136,17 @@ def _extract_features(context_dict: dict) -> pd.DataFrame:
     df = pd.DataFrame([features])
     return df[FEATURE_COLUMNS]
 
-_THRESH = {
-    "low_medium": 0.32,
-    "medium_high": 0.6,
-    "high_critical": 0.94
-}
 
 def _map_risk(score: float) -> str:
+    _load_thresholds()
+    
     s = float(np.clip(score, 0.0, 1.0))
 
-    if s < _THRESH["low_medium"]:
+    if s < _THRESH["high"]:
         return "Low"
-    elif s < _THRESH["medium_high"]:
+    elif s < _THRESH["medium"]:
         return "Medium"
-    elif s < _THRESH["high_critical"]:
+    elif s < _THRESH["low"]:
         return "High"
     else:
         return "Critical"

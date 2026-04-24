@@ -12,7 +12,7 @@ from plots import (apply_style, plot_confusion_matrix, plot_pr_and_roc,
                    plot_risk_distribution, plot_band_distribution, 
                    plot_reliability_diagram, plot_f1_vs_threshold, plot_cdf)
 from evaluation import evaluate_trust_dynamics, evaluate_trust_repair_trace, simulate_stateful_security, plot_policy_distribution
-from benchmarks import benchmark_pqc_overhead, benchmark_inference
+from benchmarks import benchmark_inference
 
 def main():
     print("[*] Creating output directories...")
@@ -68,7 +68,6 @@ def main():
     simulate_stateful_security()
     
     print("[*] Running Benchmarks...")
-    benchmark_pqc_overhead()
     benchmark_inference(model, X)
     
     print("\n[+] All evaluation artifacts generated successfully in ./outputs/")
