@@ -1,5 +1,3 @@
 **QSRAC: A Quantum-Safe, Risk-Adaptive, Stateful Access Control Framework with Cryptographic Continuity and Atomic Enforcement**
 
-Modern access control systems fail to tightly bind identity, runtime risk, and authorization state, resulting in vulnerabilities such as replay attacks, session tampering, and time-of-check-to-time-of-use (TOCTOU) inconsistencies. This paper presents QSRAC, a quantum-safe, risk-adaptive access control framework that integrates post-quantum cryptography, machine learning-based risk detection, and a cryptographically evolving authorization state.
-The system employs lattice-based key encapsulation and signature schemes to ensure quantum resistance, while an Isolation Forest model dynamically evaluates contextual risk. Authorization continuity is enforced through a hash-chain-based envelope mechanism, and a Redis Lua-based atomic state transition ensures strict sequence integrity and eliminates race conditions. Trust is modeled using an exponential decay function and can be restored via a secure multi-factor authentication (MFA) state repair mechanism.
-The proposed framework provides a unified, verifiable, and adaptive security model suitable for next-generation zero-trust environments.
+
