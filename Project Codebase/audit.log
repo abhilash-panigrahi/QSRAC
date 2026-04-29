@@ -136,3 +136,4 @@
 2026-04-23 23:26:32,976 {"timestamp": "2026-04-23T17:56:32.976667+00:00", "session_id": "{{session-id}}", "decision": "Reject", "risk": "SESSION_NOT_FOUND", "trust": 0.0, "status": "OK"}
 2026-04-23 23:29:26,372 {"timestamp": "2026-04-23T17:59:26.371953+00:00", "session_id": "c80eab90-dd89-4a09-aff6-ebd289d0b11a", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.879853, "status": "OK"}
 2026-04-23 23:30:38,185 {"timestamp": "2026-04-23T18:00:38.185467+00:00", "session_id": "b945bcc0-f9dc-47d1-b862-e96515411751", "decision": "Reject", "risk": "AttributeDenied", "trust": 0.83527, "status": "OK"}
+2026-04-29 11:44:13,920 {"timestamp": "2026-04-29T06:14:13.920287+00:00", "session_id": "831ccdb9-8867-45fe-a886-0df7a7438941", "decision": "Reject", "risk": "InvalidSignature", "trust": 1.0, "status": "OK"}

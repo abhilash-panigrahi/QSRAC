@@ -1,6 +1,6 @@
 from ml_module import get_risk_score
 
-# 3 handcrafted inputs targeting each bucket
+#INPUTS TO DEMONSTRATE FOR REVIEW
 LOW_1 = {
     "hour_of_day": 10, "request_rate": 0.2, "failed_attempts": 0,
     "geo_risk_score": 0.0, "device_trust_score": 0.95,

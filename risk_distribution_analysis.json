@@ -1,6 +1,6 @@
 {
   "low_medium": 0.32,
-  "medium_high": 0.45,
+  "medium_high": 0.6,
   "high_critical": 0.94,
   "method": "weighted_jenks_histogram",
   "diagnostics": {
